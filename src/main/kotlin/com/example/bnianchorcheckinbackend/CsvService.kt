@@ -53,4 +53,8 @@ class CsvService {
     fun getMemberByName(name: String): MemberData? {
         return members[name.lowercase()]
     }
+
+    fun getAllMembers(): List<String> {
+        return members.values.map { it.name }.sorted()
+    }
 }

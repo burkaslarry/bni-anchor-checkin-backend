@@ -40,3 +40,21 @@ data class EventAttendance(
     val membershipId: String?,
     val status: String
 )
+
+data class CheckInRequest(
+    val name: String,
+    val type: String,
+    val currentTime: String
+)
+
+data class EventRequest(
+    val name: String,
+    val date: String
+)
+
+data class CheckInRecord(
+    val name: String,
+    val type: String,
+    val timestamp: String,
+    val receivedAt: String
+)

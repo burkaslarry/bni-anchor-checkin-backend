@@ -4,17 +4,23 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.springframework.stereotype.Service
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 
 @Service
 class AttendanceService(
     private val csvService: CsvService,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val webSocketHandler: AttendanceWebSocketHandler
 ) {
 
     private val attendanceRecords = ConcurrentHashMap<String, MutableList<EventAttendance>>()
     private val memberAttendanceRecords = ConcurrentHashMap<String, MutableList<MemberAttendance>>()
+    
+    private val allRecords = CopyOnWriteArrayList<CheckInRecord>()
+    private val events = CopyOnWriteArrayList<EventRequest>()
 
     fun recordAttendance(qrPayload: String): String {
         val attendanceData = try {
@@ -43,7 +49,7 @@ class AttendanceService(
                     throw IllegalArgumentException("Invalid referrer for guest.")
                 }
                 name = attendanceData.name
-                membershipId = null // Guests don't have membership IDs
+                membershipId = null
                 type = attendanceData.type
             }
         }
@@ -52,12 +58,10 @@ class AttendanceService(
         val status = "Present"
         val eventName = "BNI Anchor Meeting"
 
-        // Record for event attendance
         attendanceRecords.computeIfAbsent(eventDate) { mutableListOf() }.add(
             EventAttendance(memberName = name, membershipId = membershipId, status = status)
         )
 
-        // Record for member attendance
         memberAttendanceRecords.computeIfAbsent(name.lowercase()) { mutableListOf() }.add(
             MemberAttendance(eventName = eventName, eventDate = eventDate, status = status)
         )
@@ -65,12 +69,45 @@ class AttendanceService(
         return "Attendance recorded successfully for $name (${type.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }})."
     }
 
+    fun recordCheckIn(request: CheckInRequest): String {
+        if (request.type.lowercase() !in listOf("guest", "member")) {
+            throw IllegalArgumentException("Invalid user type")
+        }
+
+        val record = CheckInRecord(
+            name = request.name,
+            type = request.type.lowercase(),
+            timestamp = request.currentTime,
+            receivedAt = LocalDateTime.now().toString()
+        )
+
+        allRecords.add(record)
+
+        webSocketHandler.broadcast(mapOf(
+            "type" to "new_checkin",
+            "data" to record
+        ))
+
+        return "Check-in successful"
+    }
+
+    fun getAllRecords(): List<CheckInRecord> {
+        return allRecords
+    }
+
+    fun getMembers(): List<String> {
+        return csvService.getAllMembers()
+    }
+    
+    fun createEvent(event: EventRequest) {
+        events.add(event)
+    }
+
     fun searchMemberAttendance(name: String): List<MemberAttendance> {
         return memberAttendanceRecords[name.lowercase()] ?: emptyList()
     }
 
     fun searchEventAttendance(date: String): List<EventAttendance> {
-        // Assuming date is in ISO_DATE format (e.g., "YYYY-MM-DD")
         return attendanceRecords[date] ?: emptyList()
     }
 }
