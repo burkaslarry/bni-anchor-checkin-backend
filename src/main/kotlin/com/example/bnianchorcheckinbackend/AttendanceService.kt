@@ -136,6 +136,10 @@ class AttendanceService(
     fun getMembers(): List<String> {
         return csvService.getAllMembers()
     }
+
+    fun getMembersWithDomain(): List<Map<String, String>> {
+        return csvService.getAllMembersWithDomain()
+    }
     
     fun createEvent(event: EventRequest) {
         events.add(event)

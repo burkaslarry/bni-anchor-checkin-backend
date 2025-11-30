@@ -64,4 +64,10 @@ class CsvService {
     fun getAllMembers(): List<String> {
         return members.values.map { it.name }.sorted()
     }
+
+    fun getAllMembersWithDomain(): List<Map<String, String>> {
+        return members.values
+            .sortedBy { it.name }
+            .map { mapOf("name" to it.name, "domain" to it.domain) }
+    }
 }

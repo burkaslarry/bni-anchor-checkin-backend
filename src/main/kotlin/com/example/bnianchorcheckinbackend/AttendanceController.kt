@@ -28,9 +28,9 @@ class AttendanceController(private val attendanceService: AttendanceService) {
     }
 
     @GetMapping("/api/members")
-    @Operation(summary = "Get list of members")
-    fun getMembers(): Map<String, List<String>> {
-        return mapOf("members" to attendanceService.getMembers())
+    @Operation(summary = "Get list of members with domain info")
+    fun getMembers(): Map<String, List<Map<String, String>>> {
+        return mapOf("members" to attendanceService.getMembersWithDomain())
     }
 
     @PostMapping("/api/checkin")
@@ -80,10 +80,13 @@ class AttendanceController(private val attendanceService: AttendanceService) {
     fun exportRecords(): ResponseEntity<ByteArray> {
         val records = attendanceService.getAllRecords()
         val out = ByteArrayOutputStream()
+        // Add UTF-8 BOM for Excel compatibility
+        out.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
         val writer = PrintWriter(out)
-        writer.println("Name,Type,Check-in Time,Server Received Time")
+        writer.println("Name,Domain,Type,Check-in Time,Server Received Time")
         for (record in records) {
-            writer.println("${record.name},${record.type},${record.timestamp},${record.receivedAt}")
+            val domain = record.domain.replace(",", "，") // Simple CSV escape
+            writer.println("${record.name},${domain},${record.type},${record.timestamp},${record.receivedAt}")
         }
         writer.flush()
         writer.close()
