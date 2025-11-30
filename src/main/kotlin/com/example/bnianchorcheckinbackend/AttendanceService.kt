@@ -112,6 +112,17 @@ class AttendanceService(
         ))
     }
 
+    fun deleteRecord(index: Int) {
+        if (index < 0 || index >= allRecords.size) {
+            throw IndexOutOfBoundsException("Invalid record index")
+        }
+        val removed = allRecords.removeAt(index)
+        webSocketHandler.broadcast(mapOf(
+            "type" to "record_deleted",
+            "data" to removed
+        ))
+    }
+
     fun getMembers(): List<String> {
         return csvService.getAllMembers()
     }

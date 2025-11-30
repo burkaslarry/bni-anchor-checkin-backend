@@ -57,6 +57,17 @@ class AttendanceController(private val attendanceService: AttendanceService) {
         return mapOf("status" to "success", "message" to "All records cleared")
     }
 
+    @DeleteMapping("/api/records/{index}")
+    @Operation(summary = "Delete a specific record by index")
+    fun deleteRecord(@PathVariable index: Int): ResponseEntity<Map<String, String>> {
+        return try {
+            attendanceService.deleteRecord(index)
+            ResponseEntity.ok(mapOf("status" to "success", "message" to "Record deleted"))
+        } catch (e: IndexOutOfBoundsException) {
+            ResponseEntity.status(HttpStatus.NOT_FOUND).body(mapOf("status" to "error", "message" to "Record not found"))
+        }
+    }
+
     @PostMapping("/api/events")
     @Operation(summary = "Create event")
     fun createEvent(@RequestBody request: EventRequest): Map<String, String> {

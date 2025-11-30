@@ -1,255 +1,130 @@
 # BNI Anchor Check-in Backend
 
-A Kotlin Spring Boot REST API for managing attendance check-ins at BNI Anchor meetings. The application supports recording member and guest attendance via QR code payloads, and provides endpoints to query attendance history.
+A Kotlin/Spring Boot backend API for the BNI Anchor Chapter attendance check-in system.
 
-## Features
+## 🎯 Features
 
-- **QR Code Attendance Recording**: Record attendance for members and guests using QR code payloads
-- **Member Validation**: Validates member information against a locally loaded CSV database
-- **Attendance History**: Query member and event attendance records
-- **Swagger/OpenAPI Documentation**: Interactive API documentation available at `/swagger-ui.html`
-- **REST API**: Fully RESTful API with proper HTTP status codes and error handling
+- **Member Management**: Load and manage BNI Anchor members from CSV
+- **Check-in Recording**: Record member and guest check-ins with timestamps
+- **Duplicate Prevention**: Prevents same person from checking in twice
+- **Real-time Updates**: WebSocket support for live updates
+- **CSV Export**: Export attendance records to CSV format
+- **RESTful API**: Clean REST endpoints for all operations
 
-## Project Structure
+## 🛠️ Tech Stack
 
+- **Kotlin** - Programming language
+- **Spring Boot 3.4** - Application framework
+- **Gradle** - Build tool
+- **Docker** - Containerization
+- **WebSocket** - Real-time communication
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Java 17+
+- Gradle (wrapper included)
+
+### Local Development
+
+```bash
+# Run the application
+./gradlew bootRun
+
+# Server starts at http://localhost:8080
 ```
-.
-├── build.gradle.kts                 # Gradle build configuration
-├── settings.gradle                  # Gradle settings
-├── gradle/                          # Gradle wrapper files
-├── src/
-│   ├── main/
-│   │   ├── kotlin/com/example/bnianchorcheckinbackend/
-│   │   │   ├── BniAnchorCheckinBackendApplication.kt  # Main Spring Boot application
-│   │   │   ├── DataClasses.kt                         # Data models (MemberQRData, GuestQRData, etc.)
-│   │   │   ├── CsvService.kt                          # CSV data loading service
-│   │   │   ├── AttendanceService.kt                   # Business logic for attendance recording
-│   │   │   ├── AttendanceController.kt                # REST API endpoints
-│   │   │   └── OpenApiConfig.kt                       # Swagger/OpenAPI configuration
-│   │   └── resources/
-│   │       └── members.csv                            # Member and guest data (pipe-delimited)
+
+### Docker
+
+```bash
+# Build
+docker build -t bni-checkin-backend .
+
+# Run
+docker run -p 8080:8080 bni-checkin-backend
 ```
 
-## Prerequisites
+## 📡 API Reference
 
-- Java 17 or higher
-- Gradle 8.14.3 or higher (included via wrapper)
+### Members
 
-## Running the Application
+```bash
+# Get all members
+GET /api/members
 
-1. **Build the project**:
-   ```bash
-   ./gradlew build
-   ```
+# Response
+{"members": ["Ada Hau", "Aidan Tong", ...]}
+```
 
-2. **Run the application**:
-   ```bash
-   ./gradlew bootRun
-   ```
+### Check-in
 
-   The application will start on `http://localhost:8080`
+```bash
+# Create check-in
+POST /api/checkin
+Content-Type: application/json
 
-## API Endpoints
-
-### 1. Record Attendance (POST)
-
-**Endpoint**: `POST /api/attendance/scan`
-
-**Description**: Record attendance using a QR code payload containing member or guest information.
-
-**Request Body**:
-```json
 {
-  "qrPayload": "{\"name\":\"Jessica Cheung\",\"time\":\"2025-11-16T10:30:00\",\"type\":\"member\",\"membershipId\":\"ANCHOR-001\"}"
+  "name": "Larry Lo",
+  "type": "member",  // or "guest"
+  "currentTime": "2025-11-30T10:00:00Z"
 }
+
+# Success Response
+{"status": "success", "message": "Check-in successful"}
+
+# Duplicate Error
+{"status": "error", "message": "Larry Lo 已經簽到過了 (Already checked in)"}
 ```
 
-**Response (Success - 200)**:
-```json
-{
-  "message": "Attendance recorded successfully for Jessica Cheung (Member)."
-}
+### Records
+
+```bash
+# Get all records
+GET /api/records
+
+# Delete specific record
+DELETE /api/records/{index}
+
+# Clear all records
+DELETE /api/records
+
+# Export as CSV
+GET /api/export
 ```
 
-**Response (Error - 400)**:
-```json
-{
-  "message": "Invalid member or membership ID."
-}
-```
+## 📁 Member Data
 
----
+Members are loaded from `src/main/resources/members.csv`:
 
-### 2. Search Member Attendance (GET)
-
-**Endpoint**: `GET /api/attendance/member?name=<member_name>`
-
-**Description**: Retrieve attendance history for a specific member.
-
-**Example**: `GET /api/attendance/member?name=Jessica%20Cheung`
-
-**Response (200)**:
-```json
-[
-  {
-    "eventName": "BNI Anchor Meeting",
-    "eventDate": "2025-11-16",
-    "status": "Present"
-  }
-]
-```
-
----
-
-### 3. Search Event Attendance (GET)
-
-**Endpoint**: `GET /api/attendance/event?date=<event_date>`
-
-**Description**: Get the attendance roster for a given event date (ISO date format: YYYY-MM-DD).
-
-**Example**: `GET /api/attendance/event?date=2025-11-16`
-
-**Response (200)**:
-```json
-[
-  {
-    "memberName": "Jessica Cheung",
-    "membershipId": "ANCHOR-001",
-    "status": "Present"
-  },
-  {
-    "memberName": "Karin Yeung",
-    "membershipId": null,
-    "status": "Present"
-  }
-]
-```
-
----
-
-## QR Code Payload Format
-
-The application supports two types of QR code payloads:
-
-### Member QR Code
-```json
-{
-  "name": "Jessica Cheung",
-  "time": "2025-11-16T10:30:00",
-  "type": "member",
-  "membershipId": "ANCHOR-001"
-}
-```
-
-### Guest QR Code
-```json
-{
-  "name": "Karin Yeung",
-  "time": "2025-11-16T10:35:00",
-  "type": "guest",
-  "referrer": "Larry Lo"
-}
-```
-
-## Member Data (CSV Format)
-
-Members are loaded from `src/main/resources/members.csv`. The file uses pipe-delimited format:
-
-```
+```csv
 Name | Domain | Type | Membership | Referrer
-Jessica Cheung | Personal Services | Member | ANCHOR-001 |
-Karin Yeung | Guest | Guest | | Larry Lo
+Jessica Cheung | 陪月服務 | Member | ANCHOR-001 |
+Larry Lo | 客戶服務系統 | Member | ANCHOR-007 |
+...
 ```
 
-### Column Descriptions:
-- **Name**: Person's name
-- **Domain**: Business domain or service
-- **Type**: Either "Member" or "Guest"
-- **Membership**: Membership ID (format: ANCHOR-{number}, e.g., ANCHOR-001). Only for members.
-- **Referrer**: Name of the member who referred this guest. Only for guests.
+## 🌐 Deployment
 
-## API Documentation
+### Render.com
 
-### Option 1: Swagger UI on Backend (Port 8080)
-- **Swagger UI**: http://localhost:8080/swagger-ui.html
-- **OpenAPI JSON**: http://localhost:8080/v3/api-docs
+1. Create new Web Service
+2. Connect GitHub repository
+3. Select **Docker** runtime
+4. Deploy
 
-### Option 2: Dedicated Swagger UI Server (Port 8090)
+### Environment Variables
 
-A separate Express.js server provides a cleaner Swagger UI experience on port 8090:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SERVER_PORT` | 8080 | Server port |
+| `JAVA_OPTS` | -Xmx256m | JVM options |
 
-1. **Install and start the Swagger UI server**:
-   ```bash
-   cd swagger-server
-   npm install
-   npm start
-   ```
+## 📖 Related
 
-2. **Access the UI**:
-   - **Swagger UI**: http://localhost:8090
-   - **Health Check**: http://localhost:8090/health
+- [Frontend PWA](../bni-anchor-checkin) - React frontend application
+- [API Documentation](./swagger-server) - Swagger UI
 
-The Swagger UI server proxies the OpenAPI spec from the backend API and provides an enhanced interface.
-
-## Development Notes
-
-### Technology Stack
-- **Language**: Kotlin 1.9.20
-- **Framework**: Spring Boot 3.4.0
-- **Build Tool**: Gradle 8.14.3
-- **Database**: In-memory (ConcurrentHashMap)
-- **Documentation**: Springdoc OpenAPI 2.6.0
-
-### Key Components
-
-1. **DataClasses.kt**: Defines sealed class `AttendanceQRData` with JSON polymorphic deserialization
-2. **CsvService.kt**: Loads member data from CSV file on application startup
-3. **AttendanceService.kt**: Core business logic for recording and querying attendance
-4. **AttendanceController.kt**: REST endpoints with Swagger annotations
-
-## Testing the API
-
-### Example: Record a Member Attendance
-```bash
-curl -X POST 'http://localhost:8080/api/attendance/scan' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "qrPayload": "{\"name\":\"Jessica Cheung\",\"time\":\"2025-11-16T10:30:00\",\"type\":\"member\",\"membershipId\":\"ANCHOR-001\"}"
-  }'
-```
-
-### Example: Query Member Attendance
-```bash
-curl 'http://localhost:8080/api/attendance/member?name=Jessica%20Cheung'
-```
-
-### Example: Query Event Attendance
-```bash
-curl 'http://localhost:8080/api/attendance/event?date=2025-11-16'
-```
-
-## Error Handling
-
-The API returns appropriate HTTP status codes:
-- **200 OK**: Successful request
-- **400 Bad Request**: Invalid input (e.g., invalid member ID, invalid referrer)
-
-Error responses include a message field explaining the issue.
-
-## Future Enhancements
-
-- Persistent database storage (e.g., PostgreSQL, MongoDB)
-- User authentication and authorization
-- Event management endpoints
-- CSV export of attendance records
-- Real-time notifications
-- Mobile app integration
-
-## License
+## 📄 License
 
 MIT License
-
-## Contact
-
-For questions or support, please contact the BNI Anchor team.
-
