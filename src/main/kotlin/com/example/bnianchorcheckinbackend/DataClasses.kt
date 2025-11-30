@@ -44,8 +44,7 @@ data class EventAttendance(
 data class CheckInRequest(
     val name: String,
     val type: String,
-    val currentTime: String,
-    val domain: String = ""
+    val currentTime: String
 )
 
 data class EventRequest(
@@ -56,7 +55,6 @@ data class EventRequest(
 data class CheckInRecord(
     val name: String,
     val type: String,
-    val domain: String,
     val timestamp: String,
     val receivedAt: String
 )

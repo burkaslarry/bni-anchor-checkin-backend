@@ -84,19 +84,9 @@ class AttendanceService(
             throw IllegalArgumentException("${request.name} 已經簽到過了 (Already checked in)")
         }
 
-        // Lookup domain from CSV service if not provided
-        var domain = request.domain
-        if (domain.isEmpty() && request.type.equals("member", ignoreCase = true)) {
-            val memberData = csvService.getMemberByName(request.name)
-            if (memberData != null) {
-                domain = memberData.domain
-            }
-        }
-
         val record = CheckInRecord(
             name = request.name,
             type = request.type.lowercase(),
-            domain = domain,
             timestamp = request.currentTime,
             receivedAt = LocalDateTime.now().toString()
         )
