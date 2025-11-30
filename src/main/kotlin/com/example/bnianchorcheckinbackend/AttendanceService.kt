@@ -74,6 +74,16 @@ class AttendanceService(
             throw IllegalArgumentException("Invalid user type")
         }
 
+        // Check for duplicate entry (same name and type)
+        val isDuplicate = allRecords.any { 
+            it.name.equals(request.name, ignoreCase = true) && 
+            it.type.equals(request.type, ignoreCase = true)
+        }
+        
+        if (isDuplicate) {
+            throw IllegalArgumentException("${request.name} 已經簽到過了 (Already checked in)")
+        }
+
         val record = CheckInRecord(
             name = request.name,
             type = request.type.lowercase(),
@@ -95,6 +105,13 @@ class AttendanceService(
         return allRecords
     }
 
+    fun clearAllRecords() {
+        allRecords.clear()
+        webSocketHandler.broadcast(mapOf(
+            "type" to "records_cleared"
+        ))
+    }
+
     fun getMembers(): List<String> {
         return csvService.getAllMembers()
     }
@@ -104,7 +121,11 @@ class AttendanceService(
     }
 
     fun searchMemberAttendance(name: String): List<MemberAttendance> {
-        return memberAttendanceRecords[name.lowercase()] ?: emptyList()
+        // Case-insensitive partial match search
+        val searchTerm = name.lowercase()
+        return memberAttendanceRecords.entries
+            .filter { it.key.contains(searchTerm) }
+            .flatMap { it.value }
     }
 
     fun searchEventAttendance(date: String): List<EventAttendance> {

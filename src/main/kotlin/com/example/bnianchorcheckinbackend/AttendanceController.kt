@@ -50,6 +50,13 @@ class AttendanceController(private val attendanceService: AttendanceService) {
         return mapOf("records" to attendanceService.getAllRecords())
     }
 
+    @DeleteMapping("/api/records")
+    @Operation(summary = "Clear all records")
+    fun clearRecords(): Map<String, String> {
+        attendanceService.clearAllRecords()
+        return mapOf("status" to "success", "message" to "All records cleared")
+    }
+
     @PostMapping("/api/events")
     @Operation(summary = "Create event")
     fun createEvent(@RequestBody request: EventRequest): Map<String, String> {
