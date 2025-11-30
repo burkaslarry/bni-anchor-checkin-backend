@@ -83,7 +83,7 @@ class AttendanceController(private val attendanceService: AttendanceService) {
         // Add UTF-8 BOM for Excel compatibility
         out.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
         val writer = PrintWriter(out)
-        writer.println("Name,Domain,Type,Check-in Time,Server Received Time")
+        writer.println("姓名,專業領域,類別,Check-in Time,Server Received Time")
         for (record in records) {
             val domain = record.domain.replace(",", "，") // Simple CSV escape
             writer.println("${record.name},${domain},${record.type},${record.timestamp},${record.receivedAt}")

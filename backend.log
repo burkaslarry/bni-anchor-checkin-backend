@@ -2,7 +2,13 @@
 > Task :processResources UP-TO-DATE
 
 > Task :compileKotlin FAILED
-e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceService.kt:88:30 Unresolved reference: domain
+e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:84 Unexpected tokens (use ';' to separate expressions on the same line)
+e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:85 Expecting an element
+e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:24 Too many arguments for public open fun println(): Unit defined in java.io.PrintWriter
+e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:30 Too many arguments for public open fun println(): Unit defined in java.io.PrintWriter
+e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:38 Too many arguments for public open fun println(): Unit defined in java.io.PrintWriter
+e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:44 Too many arguments for public open fun println(): Unit defined in java.io.PrintWriter
+e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:61 Too many arguments for public open fun println(): Unit defined in java.io.PrintWriter
 
 [Incubating] Problems report is available at: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/build/reports/problems/problems-report.html
 
