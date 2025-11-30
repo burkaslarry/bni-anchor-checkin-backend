@@ -1,9 +1,11 @@
 package com.example.bnianchorcheckinbackend
 
+import org.springframework.core.io.ClassPathResource
 import org.springframework.stereotype.Service
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.concurrent.ConcurrentHashMap
+import jakarta.annotation.PostConstruct
 
 data class MemberData(
     val name: String,
@@ -18,32 +20,37 @@ class CsvService {
 
     private val members = ConcurrentHashMap<String, MemberData>()
 
-    init {
+    @PostConstruct
+    fun init() {
         loadCsvData()
     }
 
     private fun loadCsvData() {
-        val resource = "members.csv"
         try {
-            InputStreamReader(javaClass.classLoader.getResourceAsStream(resource)).use { isr ->
-                BufferedReader(isr).use { reader ->
+            val resource = ClassPathResource("members.csv")
+            println("Loading members.csv from classpath: ${resource.exists()}")
+            
+            resource.inputStream.use { inputStream ->
+                BufferedReader(InputStreamReader(inputStream)).use { reader ->
                     reader.lines().skip(1).forEach { line ->
                         val parts = line.split("|").map { it.trim() }
-                        if (parts.size == 5) {
-                            val membershipId = if (parts[2].equals("Member", ignoreCase = true)) parts[3] else null
-                            val referrer = if (parts[2].equals("Guest", ignoreCase = true)) parts[4] else null
+                        if (parts.size >= 3) {
+                            val membershipId = if (parts.size > 3 && parts[2].equals("Member", ignoreCase = true)) parts[3] else null
+                            val referrer = if (parts.size > 4 && parts[2].equals("Guest", ignoreCase = true)) parts[4] else null
                             val member = MemberData(
                                 name = parts[0],
-                                domain = parts[1],
-                                type = parts[2],
+                                domain = if (parts.size > 1) parts[1] else "",
+                                type = if (parts.size > 2) parts[2] else "Member",
                                 membershipId = membershipId,
                                 referrer = referrer
                             )
                             members[parts[0].lowercase()] = member
+                            println("Loaded member: ${parts[0]}")
                         }
                     }
                 }
             }
+            println("Total members loaded: ${members.size}")
         } catch (e: Exception) {
             System.err.println("Error loading CSV data: ${e.message}")
             e.printStackTrace()
