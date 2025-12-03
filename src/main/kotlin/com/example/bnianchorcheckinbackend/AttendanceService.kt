@@ -100,6 +100,21 @@ class AttendanceService(
         }
 
         val now = LocalDateTime.now()
+        
+        // Parse client's current time for accurate check-in time
+        val clientTime = try {
+            // Parse ISO format with timezone (e.g., "2025-12-03T13:09:09.000Z" or "2025-12-03T13:09:09+08:00")
+            java.time.ZonedDateTime.parse(request.currentTime).toLocalDateTime()
+        } catch (e: Exception) {
+            try {
+                // Try parsing as LocalDateTime
+                LocalDateTime.parse(request.currentTime.replace("Z", ""))
+            } catch (e2: Exception) {
+                // Fallback to server time
+                now
+            }
+        }
+        
         val record = CheckInRecord(
             name = request.name,
             type = request.type.lowercase(),
@@ -110,9 +125,9 @@ class AttendanceService(
 
         allRecords.add(record)
         
-        // Update attendance for report page (only for members)
+        // Update attendance for report page (only for members) - use client time
         if (request.type.equals("member", ignoreCase = true)) {
-            updateAttendance(request.name, now)
+            updateAttendance(request.name, clientTime)
         }
 
         webSocketHandler.broadcast(mapOf(
