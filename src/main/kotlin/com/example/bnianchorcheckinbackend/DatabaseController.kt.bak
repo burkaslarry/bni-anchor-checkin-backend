@@ -1,0 +1,663 @@
+package com.example.bnianchorcheckinbackend
+
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.media.Schema
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.tags.Tag
+import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.*
+
+@RestController
+@RequestMapping("/api/db")
+@Tag(name = "Database", description = "Universal CRUD operations for all database tables with retry and timeout support")
+class DatabaseController(private val databaseService: DatabaseService) {
+
+    // ==================== EXCEPTION HANDLERS ====================
+
+    @ExceptionHandler(DatabaseTimeoutException::class)
+    fun handleTimeoutException(e: DatabaseTimeoutException): ResponseEntity<DatabaseResponse<Nothing>> {
+        return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT)
+            .body(DatabaseResponse(
+                success = false,
+                message = "Database operation timed out: ${e.message}"
+            ))
+    }
+
+    @ExceptionHandler(DatabaseRetryExhaustedException::class)
+    fun handleRetryExhaustedException(e: DatabaseRetryExhaustedException): ResponseEntity<DatabaseResponse<Nothing>> {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .body(DatabaseResponse(
+                success = false,
+                message = "Database operation failed after retries: ${e.message}"
+            ))
+    }
+
+    // ==================== HEALTH CHECK ====================
+
+    @GetMapping("/health")
+    @Operation(summary = "Check database health and connectivity")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Database is healthy"),
+        ApiResponse(responseCode = "503", description = "Database connection failed")
+    ])
+    fun healthCheck(): ResponseEntity<DatabaseResponse<Map<String, Any>>> {
+        return try {
+            val health = databaseService.healthCheck()
+            ResponseEntity.ok(DatabaseResponse(
+                success = true,
+                message = "Database is healthy",
+                data = health
+            ))
+        } catch (e: Exception) {
+            ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(DatabaseResponse(
+                    success = false,
+                    message = "Database health check failed: ${e.message}"
+                ))
+        }
+    }
+
+    // ==================== PROFESSION GROUPS CRUD ====================
+
+    @GetMapping("/profession-groups")
+    @Operation(
+        summary = "Get all profession groups",
+        description = "Retrieve all profession groups with retry support (3 retries, exponential backoff: 100ms, 400ms, 1600ms)"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Successfully retrieved profession groups"),
+        ApiResponse(responseCode = "504", description = "Database operation timed out"),
+        ApiResponse(responseCode = "503", description = "Database unavailable after retries")
+    ])
+    fun getAllProfessionGroups(): DatabaseResponse<List<ProfessionGroup>> {
+        val data = databaseService.getAllProfessionGroups()
+        return DatabaseResponse(
+            success = true,
+            message = "Retrieved ${data.size} profession groups",
+            data = data,
+            count = data.size
+        )
+    }
+
+    @GetMapping("/profession-groups/{code}")
+    @Operation(summary = "Get profession group by code")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Found profession group"),
+        ApiResponse(responseCode = "404", description = "Profession group not found")
+    ])
+    fun getProfessionGroupByCode(
+        @PathVariable @Parameter(description = "Profession group code (e.g., A, B, C)") code: String
+    ): ResponseEntity<DatabaseResponse<ProfessionGroup>> {
+        val data = databaseService.getProfessionGroupByCode(code)
+        return if (data != null) {
+            ResponseEntity.ok(DatabaseResponse(success = true, message = "Found profession group", data = data))
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(DatabaseResponse(success = false, message = "Profession group not found"))
+        }
+    }
+
+    @PostMapping("/profession-groups")
+    @Operation(
+        summary = "Create a new profession group",
+        description = "Create a new profession group with code and name"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "201", description = "Profession group created successfully"),
+        ApiResponse(responseCode = "400", description = "Invalid request or duplicate code")
+    ])
+    fun createProfessionGroup(
+        @RequestBody @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            description = "Profession group to create",
+            content = [Content(schema = Schema(implementation = ProfessionGroupCreateRequest::class))]
+        ) request: ProfessionGroupCreateRequest
+    ): ResponseEntity<DatabaseResponse<ProfessionGroup>> {
+        return try {
+            val data = databaseService.createProfessionGroup(request)
+            ResponseEntity.status(HttpStatus.CREATED)
+                .body(DatabaseResponse(success = true, message = "Profession group created", data = data))
+        } catch (e: Exception) {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(DatabaseResponse(success = false, message = "Failed to create: ${e.message}"))
+        }
+    }
+
+    @PutMapping("/profession-groups/{code}")
+    @Operation(summary = "Update a profession group")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Profession group updated successfully"),
+        ApiResponse(responseCode = "404", description = "Profession group not found")
+    ])
+    fun updateProfessionGroup(
+        @PathVariable @Parameter(description = "Profession group code") code: String,
+        @RequestBody request: ProfessionGroupUpdateRequest
+    ): ResponseEntity<DatabaseResponse<ProfessionGroup>> {
+        val data = databaseService.updateProfessionGroup(code, request)
+        return if (data != null) {
+            ResponseEntity.ok(DatabaseResponse(success = true, message = "Profession group updated", data = data))
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(DatabaseResponse(success = false, message = "Profession group not found"))
+        }
+    }
+
+    @DeleteMapping("/profession-groups/{code}")
+    @Operation(summary = "Delete a profession group")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Profession group deleted successfully"),
+        ApiResponse(responseCode = "404", description = "Profession group not found"),
+        ApiResponse(responseCode = "400", description = "Cannot delete - referenced by members")
+    ])
+    fun deleteProfessionGroup(
+        @PathVariable @Parameter(description = "Profession group code") code: String
+    ): ResponseEntity<DatabaseResponse<Nothing>> {
+        return try {
+            if (databaseService.deleteProfessionGroup(code)) {
+                ResponseEntity.ok(DatabaseResponse(success = true, message = "Profession group deleted"))
+            } else {
+                ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(DatabaseResponse(success = false, message = "Profession group not found"))
+            }
+        } catch (e: Exception) {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(DatabaseResponse(success = false, message = "Cannot delete: ${e.message}"))
+        }
+    }
+
+    // ==================== MEMBERS CRUD ====================
+
+    @GetMapping("/members")
+    @Operation(
+        summary = "Get all members",
+        description = "Retrieve all members with optional filtering by profession code or name search"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Successfully retrieved members"),
+        ApiResponse(responseCode = "504", description = "Database operation timed out")
+    ])
+    fun getAllDbMembers(
+        @RequestParam(required = false) @Parameter(description = "Filter by profession code (e.g., A, B, C)") professionCode: String?,
+        @RequestParam(required = false) @Parameter(description = "Search by name (partial match, case-insensitive)") name: String?
+    ): DatabaseResponse<List<Member>> {
+        val data = when {
+            professionCode != null -> databaseService.getMembersByProfessionCode(professionCode)
+            name != null -> databaseService.searchMembersByName(name)
+            else -> databaseService.getAllMembers()
+        }
+        return DatabaseResponse(
+            success = true,
+            message = "Retrieved ${data.size} members",
+            data = data,
+            count = data.size
+        )
+    }
+
+    @GetMapping("/members/{id}")
+    @Operation(summary = "Get member by ID")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Found member"),
+        ApiResponse(responseCode = "404", description = "Member not found")
+    ])
+    fun getMemberById(
+        @PathVariable @Parameter(description = "Member ID") id: Int
+    ): ResponseEntity<DatabaseResponse<Member>> {
+        val data = databaseService.getMemberById(id)
+        return if (data != null) {
+            ResponseEntity.ok(DatabaseResponse(success = true, message = "Found member", data = data))
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(DatabaseResponse(success = false, message = "Member not found"))
+        }
+    }
+
+    @PostMapping("/members")
+    @Operation(
+        summary = "Create a new member",
+        description = "Create a new member with name, profession, and profession code"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "201", description = "Member created successfully"),
+        ApiResponse(responseCode = "400", description = "Invalid request or duplicate email/phone")
+    ])
+    fun createMember(
+        @RequestBody @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            description = "Member to create",
+            content = [Content(schema = Schema(implementation = MemberCreateRequest::class))]
+        ) request: MemberCreateRequest
+    ): ResponseEntity<DatabaseResponse<Member>> {
+        return try {
+            val data = databaseService.createMember(request)
+            ResponseEntity.status(HttpStatus.CREATED)
+                .body(DatabaseResponse(success = true, message = "Member created", data = data))
+        } catch (e: Exception) {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(DatabaseResponse(success = false, message = "Failed to create: ${e.message}"))
+        }
+    }
+
+    @PutMapping("/members/{id}")
+    @Operation(
+        summary = "Update a member",
+        description = "Update member fields. Only provided fields will be updated (partial update)"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Member updated successfully"),
+        ApiResponse(responseCode = "404", description = "Member not found")
+    ])
+    fun updateMember(
+        @PathVariable @Parameter(description = "Member ID") id: Int,
+        @RequestBody @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            description = "Fields to update (partial update supported)",
+            content = [Content(schema = Schema(implementation = MemberUpdateRequest::class))]
+        ) request: MemberUpdateRequest
+    ): ResponseEntity<DatabaseResponse<Member>> {
+        val data = databaseService.updateMember(id, request)
+        return if (data != null) {
+            ResponseEntity.ok(DatabaseResponse(success = true, message = "Member updated", data = data))
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(DatabaseResponse(success = false, message = "Member not found"))
+        }
+    }
+
+    @DeleteMapping("/members/{id}")
+    @Operation(summary = "Delete a member")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Member deleted successfully"),
+        ApiResponse(responseCode = "404", description = "Member not found"),
+        ApiResponse(responseCode = "400", description = "Cannot delete - has attendance records")
+    ])
+    fun deleteMember(
+        @PathVariable @Parameter(description = "Member ID") id: Int
+    ): ResponseEntity<DatabaseResponse<Nothing>> {
+        return try {
+            if (databaseService.deleteMember(id)) {
+                ResponseEntity.ok(DatabaseResponse(success = true, message = "Member deleted"))
+            } else {
+                ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(DatabaseResponse(success = false, message = "Member not found"))
+            }
+        } catch (e: Exception) {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(DatabaseResponse(success = false, message = "Cannot delete: ${e.message}"))
+        }
+    }
+
+    // ==================== EVENTS CRUD ====================
+
+    @GetMapping("/events")
+    @Operation(
+        summary = "Get all events",
+        description = "Retrieve all events with optional date range filtering"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Successfully retrieved events")
+    ])
+    fun getAllEvents(
+        @RequestParam(required = false) @Parameter(description = "Start date filter (yyyy-MM-dd)") startDate: String?,
+        @RequestParam(required = false) @Parameter(description = "End date filter (yyyy-MM-dd)") endDate: String?
+    ): DatabaseResponse<List<Event>> {
+        val data = if (startDate != null && endDate != null) {
+            databaseService.getEventsByDateRange(startDate, endDate)
+        } else {
+            databaseService.getAllEvents()
+        }
+        return DatabaseResponse(
+            success = true,
+            message = "Retrieved ${data.size} events",
+            data = data,
+            count = data.size
+        )
+    }
+
+    @GetMapping("/events/{id}")
+    @Operation(summary = "Get event by ID")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Found event"),
+        ApiResponse(responseCode = "404", description = "Event not found")
+    ])
+    fun getEventById(
+        @PathVariable @Parameter(description = "Event ID") id: Int
+    ): ResponseEntity<DatabaseResponse<Event>> {
+        val data = databaseService.getEventById(id)
+        return if (data != null) {
+            ResponseEntity.ok(DatabaseResponse(success = true, message = "Found event", data = data))
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(DatabaseResponse(success = false, message = "Event not found"))
+        }
+    }
+
+    @PostMapping("/events")
+    @Operation(
+        summary = "Create a new event",
+        description = "Create a new event with name, date, start time, and cutoff times"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "201", description = "Event created successfully"),
+        ApiResponse(responseCode = "400", description = "Invalid request")
+    ])
+    fun createEvent(
+        @RequestBody @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            description = "Event to create. Time formats: HH:mm or HH:mm:ss",
+            content = [Content(schema = Schema(implementation = EventCreateRequest::class))]
+        ) request: EventCreateRequest
+    ): ResponseEntity<DatabaseResponse<Event>> {
+        return try {
+            val data = databaseService.createEvent(request)
+            ResponseEntity.status(HttpStatus.CREATED)
+                .body(DatabaseResponse(success = true, message = "Event created", data = data))
+        } catch (e: Exception) {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(DatabaseResponse(success = false, message = "Failed to create: ${e.message}"))
+        }
+    }
+
+    @PutMapping("/events/{id}")
+    @Operation(
+        summary = "Update an event",
+        description = "Update event fields. Only provided fields will be updated"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Event updated successfully"),
+        ApiResponse(responseCode = "404", description = "Event not found")
+    ])
+    fun updateEvent(
+        @PathVariable @Parameter(description = "Event ID") id: Int,
+        @RequestBody request: EventUpdateRequest
+    ): ResponseEntity<DatabaseResponse<Event>> {
+        val data = databaseService.updateEvent(id, request)
+        return if (data != null) {
+            ResponseEntity.ok(DatabaseResponse(success = true, message = "Event updated", data = data))
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(DatabaseResponse(success = false, message = "Event not found"))
+        }
+    }
+
+    @DeleteMapping("/events/{id}")
+    @Operation(summary = "Delete an event")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Event deleted successfully"),
+        ApiResponse(responseCode = "404", description = "Event not found"),
+        ApiResponse(responseCode = "400", description = "Cannot delete - has attendance records")
+    ])
+    fun deleteEvent(
+        @PathVariable @Parameter(description = "Event ID") id: Int
+    ): ResponseEntity<DatabaseResponse<Nothing>> {
+        return try {
+            if (databaseService.deleteEvent(id)) {
+                ResponseEntity.ok(DatabaseResponse(success = true, message = "Event deleted"))
+            } else {
+                ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(DatabaseResponse(success = false, message = "Event not found"))
+            }
+        } catch (e: Exception) {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(DatabaseResponse(success = false, message = "Cannot delete: ${e.message}"))
+        }
+    }
+
+    // ==================== ATTENDANCES CRUD ====================
+
+    @GetMapping("/attendances")
+    @Operation(
+        summary = "Get all attendances",
+        description = "Retrieve all attendance records with optional filtering by event or member"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Successfully retrieved attendances")
+    ])
+    fun getAllAttendances(
+        @RequestParam(required = false) @Parameter(description = "Filter by event ID") eventId: Int?,
+        @RequestParam(required = false) @Parameter(description = "Filter by member ID") memberId: Int?
+    ): DatabaseResponse<List<Attendance>> {
+        val data = when {
+            eventId != null -> databaseService.getAttendancesByEventId(eventId)
+            memberId != null -> databaseService.getAttendancesByMemberId(memberId)
+            else -> databaseService.getAllAttendances()
+        }
+        return DatabaseResponse(
+            success = true,
+            message = "Retrieved ${data.size} attendances",
+            data = data,
+            count = data.size
+        )
+    }
+
+    @GetMapping("/attendances/{id}")
+    @Operation(summary = "Get attendance by ID")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Found attendance"),
+        ApiResponse(responseCode = "404", description = "Attendance not found")
+    ])
+    fun getAttendanceById(
+        @PathVariable @Parameter(description = "Attendance ID") id: Int
+    ): ResponseEntity<DatabaseResponse<Attendance>> {
+        val data = databaseService.getAttendanceById(id)
+        return if (data != null) {
+            ResponseEntity.ok(DatabaseResponse(success = true, message = "Found attendance", data = data))
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(DatabaseResponse(success = false, message = "Attendance not found"))
+        }
+    }
+
+    @PostMapping("/attendances")
+    @Operation(
+        summary = "Create a new attendance record",
+        description = "Record member attendance for an event. Status can be: on-time, late, absent, late_with_code"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "201", description = "Attendance recorded successfully"),
+        ApiResponse(responseCode = "400", description = "Invalid request or duplicate attendance")
+    ])
+    fun createAttendance(
+        @RequestBody @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            description = "Attendance to create. checkInTime format: ISO-8601 with timezone (e.g., 2024-01-15T07:30:00+08:00)",
+            content = [Content(schema = Schema(implementation = AttendanceCreateRequest::class))]
+        ) request: AttendanceCreateRequest
+    ): ResponseEntity<DatabaseResponse<Attendance>> {
+        return try {
+            val data = databaseService.createAttendance(request)
+            // Refresh the materialized view after creating attendance
+            try {
+                databaseService.refreshMemberAttendanceSummary()
+            } catch (e: Exception) {
+                // Log but don't fail the request
+            }
+            ResponseEntity.status(HttpStatus.CREATED)
+                .body(DatabaseResponse(success = true, message = "Attendance recorded", data = data))
+        } catch (e: Exception) {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(DatabaseResponse(success = false, message = "Failed to create: ${e.message}"))
+        }
+    }
+
+    @PutMapping("/attendances/{id}")
+    @Operation(
+        summary = "Update an attendance record",
+        description = "Update attendance status or check-in time"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Attendance updated successfully"),
+        ApiResponse(responseCode = "404", description = "Attendance not found")
+    ])
+    fun updateAttendance(
+        @PathVariable @Parameter(description = "Attendance ID") id: Int,
+        @RequestBody request: AttendanceUpdateRequest
+    ): ResponseEntity<DatabaseResponse<Attendance>> {
+        val data = databaseService.updateAttendance(id, request)
+        return if (data != null) {
+            // Refresh the materialized view after updating attendance
+            try {
+                databaseService.refreshMemberAttendanceSummary()
+            } catch (e: Exception) {
+                // Log but don't fail the request
+            }
+            ResponseEntity.ok(DatabaseResponse(success = true, message = "Attendance updated", data = data))
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(DatabaseResponse(success = false, message = "Attendance not found"))
+        }
+    }
+
+    @DeleteMapping("/attendances/{id}")
+    @Operation(summary = "Delete an attendance record")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Attendance deleted successfully"),
+        ApiResponse(responseCode = "404", description = "Attendance not found")
+    ])
+    fun deleteAttendance(
+        @PathVariable @Parameter(description = "Attendance ID") id: Int
+    ): ResponseEntity<DatabaseResponse<Nothing>> {
+        return if (databaseService.deleteAttendance(id)) {
+            // Refresh the materialized view after deleting attendance
+            try {
+                databaseService.refreshMemberAttendanceSummary()
+            } catch (e: Exception) {
+                // Log but don't fail the request
+            }
+            ResponseEntity.ok(DatabaseResponse(success = true, message = "Attendance deleted"))
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(DatabaseResponse(success = false, message = "Attendance not found"))
+        }
+    }
+
+    // ==================== MATERIALIZED VIEW (Member Attendance Summary) ====================
+
+    @GetMapping("/summary")
+    @Operation(
+        summary = "Get member attendance summary",
+        description = "Fetch pre-computed member attendance summary from materialized view. Supports filtering by member, event, or profession code."
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Successfully retrieved summary")
+    ])
+    fun getMemberAttendanceSummary(
+        @RequestParam(required = false) @Parameter(description = "Filter by member ID") memberId: Int?,
+        @RequestParam(required = false) @Parameter(description = "Filter by event ID") eventId: Int?,
+        @RequestParam(required = false) @Parameter(description = "Filter by profession code") professionCode: String?
+    ): DatabaseResponse<List<MemberAttendanceSummary>> {
+        val data = when {
+            memberId != null -> databaseService.getMemberAttendanceSummaryByMemberId(memberId)
+            eventId != null -> databaseService.getMemberAttendanceSummaryByEventId(eventId)
+            professionCode != null -> databaseService.getMemberAttendanceSummaryByProfessionCode(professionCode)
+            else -> databaseService.getMemberAttendanceSummary()
+        }
+        return DatabaseResponse(
+            success = true,
+            message = "Retrieved ${data.size} summary records",
+            data = data,
+            count = data.size
+        )
+    }
+
+    @PostMapping("/summary/refresh")
+    @Operation(
+        summary = "Refresh materialized view",
+        description = "Manually refresh the member_attendance_summary materialized view to reflect latest data"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Materialized view refreshed successfully"),
+        ApiResponse(responseCode = "500", description = "Failed to refresh")
+    ])
+    fun refreshMemberAttendanceSummary(): ResponseEntity<DatabaseResponse<Nothing>> {
+        return try {
+            databaseService.refreshMemberAttendanceSummary()
+            ResponseEntity.ok(DatabaseResponse(success = true, message = "Materialized view refreshed successfully"))
+        } catch (e: Exception) {
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(DatabaseResponse(success = false, message = "Failed to refresh: ${e.message}"))
+        }
+    }
+
+    // ==================== UNIVERSAL TABLE ACCESS ====================
+
+    @GetMapping("/tables/{tableName}")
+    @Operation(
+        summary = "Get all data from a specific table",
+        description = "Universal table access endpoint for any table"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Successfully retrieved table data"),
+        ApiResponse(responseCode = "400", description = "Invalid table name")
+    ])
+    fun getTableData(
+        @PathVariable @Parameter(
+            description = "Table name",
+            schema = Schema(allowableValues = ["profession_groups", "members", "events", "attendances"])
+        ) tableName: String
+    ): ResponseEntity<DatabaseResponse<List<Map<String, Any?>>>> {
+        val table = TableName.fromString(tableName)
+        return if (table != null) {
+            val data = databaseService.getTableData(table)
+            ResponseEntity.ok(DatabaseResponse(
+                success = true,
+                message = "Retrieved ${data.size} records from ${table.tableName}",
+                data = data,
+                count = data.size
+            ))
+        } else {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(DatabaseResponse(
+                    success = false,
+                    message = "Invalid table name. Valid options: profession_groups, members, events, attendances"
+                ))
+        }
+    }
+
+    @GetMapping("/tables/{tableName}/count")
+    @Operation(summary = "Get record count from a specific table")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Successfully retrieved count"),
+        ApiResponse(responseCode = "400", description = "Invalid table name")
+    ])
+    fun getTableCount(
+        @PathVariable @Parameter(
+            description = "Table name",
+            schema = Schema(allowableValues = ["profession_groups", "members", "events", "attendances"])
+        ) tableName: String
+    ): ResponseEntity<DatabaseResponse<Int>> {
+        val table = TableName.fromString(tableName)
+        return if (table != null) {
+            val count = databaseService.getTableCount(table)
+            ResponseEntity.ok(DatabaseResponse(
+                success = true,
+                message = "Count from ${table.tableName}",
+                data = count,
+                count = count
+            ))
+        } else {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(DatabaseResponse(
+                    success = false,
+                    message = "Invalid table name"
+                ))
+        }
+    }
+
+    // ==================== STATISTICS ====================
+
+    @GetMapping("/stats")
+    @Operation(
+        summary = "Get database statistics",
+        description = "Get record counts for all tables"
+    )
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "Successfully retrieved statistics")
+    ])
+    fun getDatabaseStats(): DatabaseResponse<Map<String, Any>> {
+        val stats = databaseService.getDatabaseStats()
+        return DatabaseResponse(
+            success = true,
+            message = "Database statistics",
+            data = stats
+        )
+    }
+}

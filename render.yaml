@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: bni-anchor-checkin-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/members
+    envVars:
+      - key: JAVA_OPTS
+        value: -Xmx256m -Xms128m
+

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BNI Anchor Attendance API - Swagger UI</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@4/swagger-ui.css">
+    <link rel="icon" type="image/png" href="https://fastapi.tiangolo.com/img/favicon.png">
+    <style>
+        html {
+            box-sizing: border-box;
+            overflow: -moz-scrollbars-vertical;
+            overflow-y: scroll;
+        }
+        *, *:before, *:after {
+            box-sizing: inherit;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background: #fafafa;
+            font-family: sans-serif;
+        }
+        .topbar {
+            background-color: #1a1a1a;
+            padding: 10px 0;
+            text-align: center;
+            color: white;
+            border-bottom: 3px solid #4CAF50;
+        }
+        .topbar h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .topbar p {
+            margin: 5px 0 0 0;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 16px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>⚓ BNI Anchor Attendance API</h1>
+        <p>REST API for Managing Attendance Check-ins</p>
+    </div>
+    <div id="swagger-ui" class="loading">Loading API documentation...</div>
+
+    <script src="https://unpkg.com/swagger-ui-dist@4/swagger-ui.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@4/swagger-ui-standalone-preset.js"></script>
+    <script>
+        console.log('Loading Swagger UI...');
+        
+        function initSwagger() {
+            if (!window.SwaggerUIBundle) {
+                console.error('SwaggerUIBundle not loaded');
+                setTimeout(initSwagger, 500);
+                return;
+            }
+            
+            console.log('SwaggerUIBundle available, initializing...');
+            
+            try {
+                window.ui = SwaggerUIBundle({
+                    url: "/api-docs",
+                    dom_id: '#swagger-ui',
+                    deepLinking: true,
+                    presets: [
+                        SwaggerUIBundle.presets.apis,
+                        SwaggerUIStandalonePreset
+                    ],
+                    plugins: [
+                        SwaggerUIBundle.plugins.DownloadUrl
+                    ],
+                    layout: "StandaloneLayout",
+                    defaultModelsExpandDepth: 1,
+                    defaultModelExpandDepth: 1,
+                    onComplete: function() {
+                        console.log('Swagger UI loaded successfully');
+                    },
+                    onFailure: function(error) {
+                        console.error('Swagger UI failed to load:', error);
+                        document.getElementById('swagger-ui').innerHTML = '<div style="padding: 20px; color: red;">Error loading API documentation. Please ensure the backend API is running on http://localhost:8080</div>';
+                    }
+                });
+            } catch (error) {
+                console.error('Error initializing Swagger UI:', error);
+                document.getElementById('swagger-ui').innerHTML = '<div style="padding: 20px; color: red;">Error: ' + error.message + '</div>';
+            }
+        }
+        
+        // Wait for DOM to be ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                console.log('DOM loaded');
+                setTimeout(initSwagger, 1000);
+            });
+        } else {
+            console.log('DOM already ready');
+            setTimeout(initSwagger, 1000);
+        }
+    </script>
+</body>
+</html>
+
