@@ -109,18 +109,57 @@ class AttendanceController(private val attendanceService: AttendanceService) {
     }
 
     @GetMapping("/api/export")
-    @Operation(summary = "Export records as CSV")
+    @Operation(summary = "Export records as CSV with attendance status")
     fun exportRecords(): ResponseEntity<ByteArray> {
-        val records = attendanceService.getAllRecords()
         val out = ByteArrayOutputStream()
         // Add UTF-8 BOM for Excel compatibility
         out.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
         val writer = PrintWriter(out)
-        writer.println("姓名,專業領域,類別,Check-in Time,Server Received Time")
-        for (record in records) {
-            val domain = record.domain.replace(",", "，") // Simple CSV escape
-            writer.println("${record.name},${domain},${record.type},${record.timestamp},${record.receivedAt}")
+        writer.println("姓名,專業領域,類別,出席狀態,簽到時間")
+        
+        // Get current event's attendance data
+        val reportData = attendanceService.getReportData()
+        val records = attendanceService.getAllRecords()
+        
+        if (reportData != null) {
+            // Export all members with their status from the event attendance
+            val membersWithDomain = attendanceService.getMembersWithDomain()
+            
+            // Combine attendees and absentees
+            for (attendee in reportData.attendees) {
+                val memberDomain = membersWithDomain.find { it["name"] == attendee.memberName }?.get("domain") ?: ""
+                val domain = memberDomain.replace(",", "，")
+                val statusText = when (attendee.status) {
+                    "on-time" -> "準時"
+                    "late" -> "遲到"
+                    else -> attendee.status
+                }
+                val checkInTime = attendee.checkInTime ?: ""
+                writer.println("${attendee.memberName},${domain},member,${statusText},${checkInTime}")
+            }
+            
+            for (absentee in reportData.absentees) {
+                val memberDomain = membersWithDomain.find { it["name"] == absentee.memberName }?.get("domain") ?: ""
+                val domain = memberDomain.replace(",", "，")
+                writer.println("${absentee.memberName},${domain},member,缺席,")
+            }
+            
+            // Export guests from check-in records
+            val guests = records.filter { it.type.equals("guest", ignoreCase = true) }
+            for (guest in guests) {
+                val domain = guest.domain.replace(",", "，")
+                // Determine guest status based on timestamp and cutoff
+                val guestStatus = determineGuestStatus(guest.timestamp, reportData.onTimeCutoff)
+                writer.println("${guest.name},${domain},guest,${guestStatus},${guest.timestamp}")
+            }
+        } else {
+            // Fallback: export raw records if no event exists
+            for (record in records) {
+                val domain = record.domain.replace(",", "，")
+                writer.println("${record.name},${domain},${record.type},已簽到,${record.timestamp}")
+            }
         }
+        
         writer.flush()
         writer.close()
 
@@ -128,6 +167,23 @@ class AttendanceController(private val attendanceService: AttendanceService) {
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=attendance.csv")
             .contentType(MediaType.parseMediaType("text/csv"))
             .body(out.toByteArray())
+    }
+    
+    private fun determineGuestStatus(timestamp: String, onTimeCutoff: String): String {
+        return try {
+            val cutoffTime = java.time.LocalTime.parse(onTimeCutoff)
+            // Try to extract time from timestamp (supports various formats)
+            val timePattern = Regex("T?(\\d{2}:\\d{2}:\\d{2})")
+            val match = timePattern.find(timestamp)
+            if (match != null) {
+                val checkInTime = java.time.LocalTime.parse(match.groupValues[1])
+                if (checkInTime.isBefore(cutoffTime)) "準時" else "遲到"
+            } else {
+                "已簽到"
+            }
+        } catch (e: Exception) {
+            "已簽到"
+        }
     }
 
     @GetMapping("/api/attendance/member")
