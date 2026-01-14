@@ -197,4 +197,35 @@ class AttendanceController(private val attendanceService: AttendanceService) {
     fun searchEventAttendance(@RequestParam date: String): List<EventAttendance> {
         return attendanceService.searchEventAttendance(date)
     }
+    
+    // ===== AI Insights Endpoints (Phase 2 - For Future AI Integration) =====
+    
+    @PostMapping("/api/insights/generate")
+    @Operation(summary = "Generate AI insights report for an event (stub for future AI integration)")
+    fun generateAIInsights(@RequestBody request: AIInsightRequest): ResponseEntity<AIInsightResponse> {
+        val insights = attendanceService.generateInsights(request)
+        return ResponseEntity.ok(insights)
+    }
+    
+    @GetMapping("/api/insights/{eventId}")
+    @Operation(summary = "Get previously generated AI insights for an event")
+    fun getEventInsights(@PathVariable eventId: Int): ResponseEntity<List<AIInsightResponse>> {
+        val insights = attendanceService.getEventInsights(eventId)
+        return if (insights.isNotEmpty()) {
+            ResponseEntity.ok(insights)
+        } else {
+            ResponseEntity.ok(emptyList())
+        }
+    }
+    
+    @GetMapping("/api/insights/data-export/{eventId}")
+    @Operation(summary = "Export event data in AI-ready format for external processing")
+    fun exportAIReadyData(@PathVariable eventId: Int): ResponseEntity<Map<String, Any>> {
+        val exportData = attendanceService.exportAIReadyData(eventId)
+        return if (exportData != null) {
+            ResponseEntity.ok(exportData)
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND).body(mapOf("error" to "Event not found"))
+        }
+    }
 }
