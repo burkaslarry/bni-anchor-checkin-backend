@@ -124,9 +124,13 @@ class AttendanceController(private val attendanceService: AttendanceService) {
         if (reportData != null) {
             // Export all members with their status from the event attendance
             val membersWithDomain = attendanceService.getMembersWithDomain()
+            val validMemberNames = membersWithDomain.map { it["name"] }.toSet()
             
-            // Combine attendees and absentees
+            // Combine attendees and absentees (only valid members)
             for (attendee in reportData.attendees) {
+                // Skip if not a valid member (not in members.csv)
+                if (!validMemberNames.contains(attendee.memberName)) continue
+                
                 val memberDomain = membersWithDomain.find { it["name"] == attendee.memberName }?.get("domain") ?: ""
                 val domain = memberDomain.replace(",", "，")
                 val statusText = when (attendee.status) {
@@ -139,6 +143,9 @@ class AttendanceController(private val attendanceService: AttendanceService) {
             }
             
             for (absentee in reportData.absentees) {
+                // Skip if not a valid member (not in members.csv)
+                if (!validMemberNames.contains(absentee.memberName)) continue
+                
                 val memberDomain = membersWithDomain.find { it["name"] == absentee.memberName }?.get("domain") ?: ""
                 val domain = memberDomain.replace(",", "，")
                 writer.println("${absentee.memberName},${domain},member,缺席,")

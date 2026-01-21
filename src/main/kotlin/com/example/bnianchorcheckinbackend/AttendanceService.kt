@@ -15,7 +15,8 @@ import java.util.concurrent.atomic.AtomicInteger
 class AttendanceService(
     private val csvService: CsvService,
     private val objectMapper: ObjectMapper,
-    private val webSocketHandler: AttendanceWebSocketHandler
+    private val webSocketHandler: AttendanceWebSocketHandler,
+    private val deepSeekService: DeepSeekService
 ) {
 
     private val attendanceRecords = ConcurrentHashMap<String, MutableList<EventAttendance>>()
@@ -352,28 +353,35 @@ class AttendanceService(
         val event = events.find { it.id == request.eventId }
         val attendanceMap = eventAttendanceMap[request.eventId]
         
-        // Generate stub insights based on analysis type
+        // Generate insights with AI
         val insights = when (request.analysisType) {
             "interest" -> generateInterestInsights(attendanceMap)
-            "retention" -> generateRetentionInsights(attendanceMap)
+            "retention" -> generateRetentionInsightsWithAI(attendanceMap)
             "target_audience" -> generateTargetAudienceInsights(attendanceMap)
             else -> emptyList()
         }
         
+        // Use DeepSeek for recommendations
         val recommendations = when (request.analysisType) {
-            "interest" -> listOf(
+            "retention" -> {
+                val records = attendanceMap?.values?.toList() ?: emptyList()
+                val totalCount = records.size
+                val attendedCount = records.count { it.status != "absent" }
+                val lateCount = records.count { it.status == "late" }
+                val absentMembers = records.filter { it.status == "absent" }.map { it.memberName }
+                
+                val aiRecommendation = deepSeekService.generateRetentionStrategy(
+                    attendanceRate = attendedCount.toDouble() / maxOf(totalCount, 1),
+                    lateRate = lateCount.toDouble() / maxOf(totalCount, 1),
+                    absentMembers = absentMembers
+                )
+                
+                listOf(aiRecommendation)
+            }
+            else -> listOf(
                 "根據出席數據分析，建議下次活動主題聚焦於高互動話題",
-                "VIP嘉賓傾向參與專業技術分享場次"
+                "建議針對高參與度會員提供更多專業分享機會"
             )
-            "retention" -> listOf(
-                "出席率高於80%的會員可作為核心推廣對象",
-                "建議針對連續缺席的會員進行回訪關懷"
-            )
-            "target_audience" -> listOf(
-                "高潛力回流客群已標記，建議優先發送邀請",
-                "新訪客轉換率分析顯示專業領域分享效果最佳"
-            )
-            else -> emptyList()
         }
         
         val response = AIInsightResponse(
@@ -421,7 +429,7 @@ class AttendanceService(
         )
     }
     
-    private fun generateRetentionInsights(attendanceMap: ConcurrentHashMap<String, AttendanceRecord>?): List<InsightItem> {
+    private fun generateRetentionInsightsWithAI(attendanceMap: ConcurrentHashMap<String, AttendanceRecord>?): List<InsightItem> {
         if (attendanceMap == null) return emptyList()
         
         val records = attendanceMap.values.toList()
