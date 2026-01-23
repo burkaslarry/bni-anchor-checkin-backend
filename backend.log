@@ -1,35 +1,109 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
 > Task :checkKotlinGradlePluginConfigurationErrors
+> Task :compileKotlin UP-TO-DATE
+> Task :compileJava NO-SOURCE
 > Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :resolveMainClassName UP-TO-DATE
 
-> Task :compileKotlin FAILED
-e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:84 Unexpected tokens (use ';' to separate expressions on the same line)
-e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:85 Expecting an element
-e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:24 Too many arguments for public open fun println(): Unit defined in java.io.PrintWriter
-e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:30 Too many arguments for public open fun println(): Unit defined in java.io.PrintWriter
-e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:38 Too many arguments for public open fun println(): Unit defined in java.io.PrintWriter
-e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:44 Too many arguments for public open fun println(): Unit defined in java.io.PrintWriter
-e: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/src/main/kotlin/com/example/bnianchorcheckinbackend/AttendanceController.kt:86:61 Too many arguments for public open fun println(): Unit defined in java.io.PrintWriter
+> Task :bootRun
 
-[Incubating] Problems report is available at: file:///Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/build/reports/problems/problems-report.html
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
 
-FAILURE: Build failed with an exception.
+ :: Spring Boot ::                (v3.4.0)
 
-* What went wrong:
-Execution failed for task ':compileKotlin'.
-> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
-   > Compilation error. See log for more details
-
-* Try:
-> Run with --stacktrace option to get the stack trace.
-> Run with --info or --debug option to get more log output.
-> Run with --scan to get full insights.
-> Get more help at https://help.gradle.org.
-
-Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
-
-You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
-
-For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
-
-BUILD FAILED in 1s
-3 actionable tasks: 2 executed, 1 up-to-date
+2026-01-23T14:30:31.508+08:00  INFO 51651 --- [           main] e.b.BniAnchorCheckinBackendApplicationKt : Starting BniAnchorCheckinBackendApplicationKt using Java 21.0.2 with PID 51651 (/Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend/build/classes/kotlin/main started by larrylo in /Users/larrylo/SourceProject/bni-checkin/bni-anchor-checkin-backend)
+2026-01-23T14:30:31.509+08:00  INFO 51651 --- [           main] e.b.BniAnchorCheckinBackendApplicationKt : No active profile set, falling back to 1 default profile: "default"
+2026-01-23T14:30:32.055+08:00  INFO 51651 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 10000 (http)
+2026-01-23T14:30:32.061+08:00  INFO 51651 --- [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-01-23T14:30:32.061+08:00  INFO 51651 --- [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.33]
+2026-01-23T14:30:32.081+08:00  INFO 51651 --- [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-01-23T14:30:32.082+08:00  INFO 51651 --- [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 555 ms
+Loading members.csv...
+Loaded member: Jessica Cheung
+Loaded member: Tam O Yan
+Loaded member: Cyrus Koo
+Loaded member: Eric Ho
+Loaded member: Raymond Kuo
+Loaded member: Joe Li
+Loaded member: Larry Lo
+Loaded member: Zoe Wu
+Loaded member: Charlotte Kamta
+Loaded member: Chester Law
+Loaded member: Alfred Wong
+Loaded member: Stan Wang
+Loaded member: Gigi Liu
+Loaded member: Eric Su
+Loaded member: Leo Lam
+Loaded member: Chris Lee
+Loaded member: Charlotte Lau
+Loaded member: Bill Chung
+Loaded member: Alfred Lau
+Loaded member: Elaine Tang
+Loaded member: Steve Ho
+Loaded member: Frankie Ng
+Loaded member: Eddie Chou
+Loaded member: Richard Wong
+Loaded member: Dave Law
+Loaded member: Hing Wong
+Loaded member: Jayden Wong
+Loaded member: Raymond Chan
+Loaded member: Elva Cheung
+Loaded member: Joanne Chan
+Loaded member: Tulip Yip
+Loaded member: Andrew Fong
+Loaded member: Eddy Wong
+Loaded member: Summer Ha
+Loaded member: Ada Hau
+Loaded member: Aidan Tong
+Loaded member: Angel Liu
+Loaded member: Dr. Chow Chong Kwan
+Loaded member: Wayne Lo
+Loaded member: Kate Woo
+Loaded member: Jason Wong
+Loaded member: Li Ka Wai
+Loaded member: Fan Lam
+Loaded member: Phoebe Lin
+Loaded member: Cherry Xu
+Loaded member: Ling Wan
+Loaded member: Sunny Wong
+Loaded member: Kevin Ho
+Loaded member: Eison Chiang
+Loaded member: Kwok Kuen Wong
+Loaded member: Locus Lam
+Total members loaded: 51
+2026-01-23T14:30:32.344+08:00  INFO 51651 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 10000 (http) with context path '/'
+2026-01-23T14:30:32.349+08:00  INFO 51651 --- [           main] e.b.BniAnchorCheckinBackendApplicationKt : Started BniAnchorCheckinBackendApplicationKt in 0.997 seconds (process running for 1.116)
+2026-01-23T14:30:46.541+08:00  INFO 51651 --- [io-10000-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-01-23T14:30:46.541+08:00  INFO 51651 --- [io-10000-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-01-23T14:30:46.542+08:00  INFO 51651 --- [io-10000-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+🤖 [DeepSeekService] Starting matchMembersWithAI
+📊 [DeepSeekService] Guest: John Doe (Marketing)
+📊 [DeepSeekService] Members count: 51
+✅ [DeepSeekService] API key configured: sk-51a961f...
+📝 [DeepSeekService] Prompt length: 2114 chars
+📤 [DeepSeekService] Sending request to: https://api.deepseek.com/v1/chat/completions
+📥 [DeepSeekService] Response status: 200
+✅ [DeepSeekService] Response received (4193 chars)
+📄 [DeepSeekService] Content preview: ...
+⚠️ [DeepSeekService] No JSON array found, returning full content
+🤖 [DeepSeekService] Starting matchMembersWithAI
+📊 [DeepSeekService] Guest: Jane Smith (青少年 IT & AI 教育導師)
+📊 [DeepSeekService] Members count: 51
+✅ [DeepSeekService] API key configured: sk-51a961f...
+📝 [DeepSeekService] Prompt length: 2089 chars
+📤 [DeepSeekService] Sending request to: https://api.deepseek.com/v1/chat/completions
+📥 [DeepSeekService] Response status: 200
+✅ [DeepSeekService] Response received (3190 chars)
+📄 [DeepSeekService] Content preview: ```json
+[
+  {
+    "memberName": "Eison Chiang",
+    "matchStrength": "High",
+    "reason": "Eison Chiang (科技教育) 與來賓 Jane Smith (青少年 IT & AI 教育導師) 同屬教育與科技結合領域，可直接進行課程資源共享、教學方法交流、潛在的合作項目開發（如合辦夏令營、工作坊）或學...
+✅ [DeepSeekService] JSON extracted successfully
