@@ -26,27 +26,29 @@ class CsvService {
 
     private fun loadCsvData() {
         try {
-            val inputStream = Thread.currentThread().contextClassLoader.getResourceAsStream("members.csv")
+            // Try to load member-anchor.csv first, fallback to members.csv
+            val inputStream = Thread.currentThread().contextClassLoader.getResourceAsStream("member-anchor.csv")
+                ?: javaClass.getResourceAsStream("/member-anchor.csv")
+                ?: Thread.currentThread().contextClassLoader.getResourceAsStream("members.csv")
                 ?: javaClass.getResourceAsStream("/members.csv")
-                ?: throw IllegalStateException("members.csv not found in classpath")
+                ?: throw IllegalStateException("No member CSV file found in classpath")
             
-            println("Loading members.csv...")
+            println("Loading member CSV file...")
             
             BufferedReader(InputStreamReader(inputStream)).use { reader ->
                 reader.lines().skip(1).forEach { line ->
-                    val parts = line.split("|").map { it.trim() }
-                    if (parts.size >= 3) {
-                        val membershipId = if (parts.size > 3 && parts[2].equals("Member", ignoreCase = true)) parts[3] else null
-                        val referrer = if (parts.size > 4 && parts[2].equals("Guest", ignoreCase = true)) parts[4] else null
+                    // Handle CSV format: Name,Type,Membership ID
+                    val parts = line.split(",").map { it.trim() }
+                    if (parts.size >= 2 && parts[0].isNotBlank()) {
                         val member = MemberData(
                             name = parts[0],
                             domain = if (parts.size > 1) parts[1] else "",
-                            type = if (parts.size > 2) parts[2] else "Member",
-                            membershipId = membershipId,
-                            referrer = referrer
+                            type = "Member",
+                            membershipId = if (parts.size > 2) parts[2] else null,
+                            referrer = null
                         )
                         members[parts[0].lowercase()] = member
-                        println("Loaded member: ${parts[0]}")
+                        println("Loaded member: ${parts[0]} - ${parts.getOrNull(1) ?: ""}")
                     }
                 }
             }
@@ -69,5 +71,12 @@ class CsvService {
         return members.values
             .sortedBy { it.name }
             .map { mapOf("name" to it.name, "domain" to it.domain) }
+    }
+    
+    /**
+     * Get members list for matching API
+     */
+    fun getMembers(): List<MemberData> {
+        return members.values.toList().sortedBy { it.name }
     }
 }

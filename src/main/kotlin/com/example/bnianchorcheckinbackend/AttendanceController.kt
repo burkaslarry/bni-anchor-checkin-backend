@@ -14,7 +14,10 @@ data class QrScanRequest(val qrPayload: String)
 
 @RestController
 @Tag(name = "Attendance", description = "Endpoints for scanning and querying attendance records.")
-class AttendanceController(private val attendanceService: AttendanceService) {
+class AttendanceController(
+    private val attendanceService: AttendanceService,
+    private val guestService: GuestService
+) {
 
     @PostMapping("/api/attendance/scan")
     @Operation(summary = "Record attendance using a QR payload.")
@@ -31,6 +34,12 @@ class AttendanceController(private val attendanceService: AttendanceService) {
     @Operation(summary = "Get list of members with domain info")
     fun getMembers(): Map<String, List<Map<String, String>>> {
         return mapOf("members" to attendanceService.getMembersWithDomain())
+    }
+
+    @GetMapping("/api/guests")
+    @Operation(summary = "Get list of pre-registered guests with profession info")
+    fun getGuests(): Map<String, List<Map<String, String>>> {
+        return mapOf("guests" to guestService.getAllGuestsWithDomain())
     }
 
     @PostMapping("/api/checkin")
