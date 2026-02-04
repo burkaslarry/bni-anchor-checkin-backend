@@ -1,10 +1,13 @@
 package com.example.bnianchorcheckinbackend
 
 import org.springframework.stereotype.Service
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.concurrent.ConcurrentHashMap
 import jakarta.annotation.PostConstruct
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 data class GuestData(
     val name: String,
@@ -26,25 +29,32 @@ class GuestService {
 
     private fun loadGuestData() {
         try {
-            // List of known guest-event CSV files to load
-            val guestCsvFiles = listOf(
-                "guest-event-20260218.csv"
-                // Add more files here as needed
-            )
+            val resolver = PathMatchingResourcePatternResolver()
+            val resources = resolver.getResources("classpath*:guest-event-*.csv")
             
-            for (filename in guestCsvFiles) {
-                val inputStream = Thread.currentThread().contextClassLoader.getResourceAsStream(filename)
-                    ?: javaClass.getResourceAsStream("/$filename")
+            val today = LocalDate.now()
+            val dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
+            
+            for (resource in resources) {
+                val filename = resource.filename ?: continue
                 
-                if (inputStream == null) {
-                    println("Guest file $filename not found, skipping")
-                    continue
+                // Extract date from filename guest-event-YYYYMMDD.csv
+                val dateStr = filename.substringAfter("guest-event-").substringBefore(".csv")
+                try {
+                    val fileDate = LocalDate.parse(dateStr, dateFormatter)
+                    // Only load if the file date is today or in the future
+                    if (fileDate.isBefore(today)) {
+                        println("Skipping old guest file: $filename")
+                        continue
+                    }
+                } catch (e: Exception) {
+                    println("Could not parse date from filename $filename, loading anyway")
                 }
-                
+
                 guestFiles.add(filename)
                 println("Loading $filename...")
                 
-                BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                BufferedReader(InputStreamReader(resource.inputStream)).use { reader ->
                     reader.lines().skip(1).forEach { line ->
                         // Handle CSV format: Name,Profession,Referrer
                         val parts = line.split(",").map { it.trim() }
@@ -63,7 +73,7 @@ class GuestService {
             }
             
             if (guestFiles.isEmpty()) {
-                println("No guest CSV files found")
+                println("No current or future guest CSV files found")
             } else {
                 println("Total guests loaded: ${guests.size} from ${guestFiles.size} file(s)")
             }
