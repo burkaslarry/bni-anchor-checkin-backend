@@ -1,5 +1,6 @@
 package com.example.bnianchorcheckinbackend
 
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
@@ -8,7 +9,8 @@ import org.springframework.web.bind.annotation.*
 @CrossOrigin(origins = ["*"])
 class MatchingController(
     private val deepSeekService: DeepSeekService,
-    private val csvService: CsvService
+    private val csvService: CsvService,
+    @Autowired(required = false) private val databaseMemberService: DatabaseMemberService?
 ) {
     
     data class MemberMatchResponse(
@@ -48,15 +50,30 @@ class MatchingController(
         val guestProfession: String
     )
     
+    private fun getMembersForMatching(): List<DeepSeekService.MemberInfo> {
+        return if (databaseMemberService != null) {
+            try {
+                databaseMemberService.getAllMembers().map { m ->
+                    DeepSeekService.MemberInfo(
+                        m["name"] as String,
+                        m["domain"] as? String ?: ""
+                    )
+                }
+            } catch (e: Exception) {
+                csvService.getMembers().map { DeepSeekService.MemberInfo(it.name, it.domain) }
+            }
+        } else {
+            csvService.getMembers().map { DeepSeekService.MemberInfo(it.name, it.domain) }
+        }
+    }
+
     @PostMapping("/quick")
     fun quickMatch(
         @RequestBody request: QuickMatchRequest
     ): ResponseEntity<MemberMatchResponse> {
         return try {
             println("📥 [MatchingController] Quick match for: ${request.guestName} (${request.guestProfession})")
-            val members = csvService.getMembers().map { 
-                DeepSeekService.MemberInfo(it.name, it.domain) 
-            }
+            val members = getMembersForMatching()
             val result = deepSeekService.quickMatchForCheckin(
                 request.guestName, 
                 request.guestProfession, 
@@ -112,9 +129,7 @@ class MatchingController(
         return try {
             println("📥 [MatchingController] Batch match for ${request.guests.size} guests (parallel processing)")
             
-            val members = csvService.getMembers().map { 
-                DeepSeekService.MemberInfo(it.name, it.domain) 
-            }
+            val members = getMembersForMatching()
             
             // Process guests in parallel using Java parallel streams
             // Limit concurrency to avoid API rate limits

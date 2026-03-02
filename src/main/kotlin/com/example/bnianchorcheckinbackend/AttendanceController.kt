@@ -2,6 +2,7 @@ package com.example.bnianchorcheckinbackend
 
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -12,11 +13,22 @@ import java.io.PrintWriter
 
 data class QrScanRequest(val qrPayload: String)
 
+data class AttendanceLogRequest(
+    val attendeeId: Int?,
+    val attendeeType: String,
+    val attendeeName: String,
+    val eventDate: String,
+    val checkedInAt: String,
+    val status: String
+)
+
 @RestController
 @Tag(name = "Attendance", description = "Endpoints for scanning and querying attendance records.")
 class AttendanceController(
     private val attendanceService: AttendanceService,
-    private val guestService: GuestService
+    private val guestService: GuestService,
+    private val databaseMemberService: DatabaseMemberService?,
+    @Autowired(required = false) private val eventDbService: EventDbService?
 ) {
 
     @PostMapping("/api/attendance/scan")
@@ -31,15 +43,49 @@ class AttendanceController(
     }
 
     @GetMapping("/api/members")
-    @Operation(summary = "Get list of members with domain info")
-    fun getMembers(): Map<String, List<Map<String, String>>> {
-        return mapOf("members" to attendanceService.getMembersWithDomain())
+    @Operation(summary = "Get list of members with domain info and standing")
+    fun getMembers(): Map<String, List<Map<String, Any>>> {
+        // Try to get from PostgreSQL database first, fallback to CSV
+        return if (databaseMemberService != null) {
+            try {
+                val dbMembers = databaseMemberService.getAllMembers()
+                if (dbMembers.isNotEmpty()) {
+                    mapOf("members" to dbMembers)
+                } else {
+                    // Fallback to CSV if database is empty
+                    mapOf("members" to attendanceService.getMembersWithDomain())
+                }
+            } catch (e: Exception) {
+                // Fallback to CSV on any database error
+                mapOf("members" to attendanceService.getMembersWithDomain())
+            }
+        } else {
+            // Use CSV if database service is not available
+            mapOf("members" to attendanceService.getMembersWithDomain())
+        }
     }
 
     @GetMapping("/api/guests")
     @Operation(summary = "Get list of pre-registered guests with profession info")
     fun getGuests(): Map<String, List<Map<String, String>>> {
-        return mapOf("guests" to guestService.getAllGuestsWithDomain())
+        // Try to get from PostgreSQL database first, fallback to CSV
+        return if (databaseMemberService != null) {
+            try {
+                val dbGuests = databaseMemberService.getAllGuests()
+                if (dbGuests.isNotEmpty()) {
+                    mapOf("guests" to dbGuests)
+                } else {
+                    // Fallback to CSV if database is empty
+                    mapOf("guests" to guestService.getAllGuestsWithDomain())
+                }
+            } catch (e: Exception) {
+                // Fallback to CSV on any database error
+                mapOf("guests" to guestService.getAllGuestsWithDomain())
+            }
+        } else {
+            // Use CSV if database service is not available
+            mapOf("guests" to guestService.getAllGuestsWithDomain())
+        }
     }
 
     @PostMapping("/api/checkin")
@@ -80,18 +126,55 @@ class AttendanceController(
     @PostMapping("/api/events")
     @Operation(summary = "Create event with time settings, initializes all members as absent")
     fun createEvent(@RequestBody request: EventRequest): ResponseEntity<Map<String, Any>> {
-        val eventData = attendanceService.createEvent(request)
-        return ResponseEntity.ok(mapOf(
-            "status" to "success", 
-            "message" to "Event created with all members set to absent",
-            "event" to eventData
-        ))
+        val log = org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
+        return try {
+            val eventData = if (eventDbService != null) {
+                try {
+                    eventDbService.createEvent(request)
+                } catch (dbEx: Exception) {
+                    log.warn("DB createEvent failed ({}), falling back to in-memory", dbEx.message)
+                    attendanceService.createEvent(request)
+                }
+            } else {
+                attendanceService.createEvent(request)
+            }
+            ResponseEntity.ok(mapOf(
+                "status" to "success",
+                "message" to "Event created with all members set to absent",
+                "event" to eventData
+            ))
+        } catch (e: java.time.format.DateTimeParseException) {
+            val msg = "Invalid date or time format. Use date YYYY-MM-DD and times HH:mm or HH:mm:ss. ${e.message}"
+            log.warn("Create event failed: {}", msg)
+            ResponseEntity.status(HttpStatus.BAD_REQUEST).body(mapOf(
+                "status" to "error",
+                "message" to msg
+            ))
+        } catch (e: IllegalArgumentException) {
+            log.warn("Create event failed: {}", e.message)
+            ResponseEntity.status(HttpStatus.BAD_REQUEST).body(mapOf(
+                "status" to "error",
+                "message" to (e.message ?: "Invalid request"))
+            )
+        } catch (e: Exception) {
+            log.error("Create event failed", e)
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(mapOf(
+                "status" to "error",
+                "message" to (e.message ?: "Event creation failed. Check server logs for details.")
+            ))
+        }
     }
     
     @GetMapping("/api/report")
     @Operation(summary = "Get report data for the current event")
     fun getReportData(): ResponseEntity<ReportData> {
-        val reportData = attendanceService.getReportData()
+        val reportData = try {
+            eventDbService?.getReportData()
+        } catch (e: Exception) {
+            org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
+                .warn("DB getReportData failed ({}), falling back to in-memory", e.message)
+            null
+        } ?: attendanceService.getReportData()
         return if (reportData != null) {
             ResponseEntity.ok(reportData)
         } else {
@@ -102,7 +185,11 @@ class AttendanceController(
     @GetMapping("/api/events/current")
     @Operation(summary = "Get current event")
     fun getCurrentEvent(): ResponseEntity<EventData> {
-        val event = attendanceService.getCurrentEvent()
+        val event = try {
+            eventDbService?.getCurrentEvent()
+        } catch (e: Exception) {
+            null
+        } ?: attendanceService.getCurrentEvent()
         return if (event != null) {
             ResponseEntity.ok(event)
         } else {
@@ -110,9 +197,92 @@ class AttendanceController(
         }
     }
     
+    @GetMapping("/api/events/check")
+    @Operation(summary = "Check if event exists for a given date")
+    fun checkEventExists(@RequestParam date: String): Map<String, Any> {
+        val exists = try {
+            eventDbService?.hasEventForDate(date)
+        } catch (e: Exception) { null } ?: (attendanceService.getCurrentEvent()?.date == date)
+        return mapOf("exists" to exists)
+    }
+    
+    @GetMapping("/api/events/check-this-week")
+    @Operation(summary = "Check if event exists in the current week")
+    fun checkEventThisWeek(): Map<String, Any> {
+        val exists = try {
+            eventDbService?.hasEventThisWeek()
+        } catch (e: Exception) { null } ?: run {
+            val memEvent = attendanceService.getCurrentEvent()
+            if (memEvent != null) {
+                val eventDate = java.time.LocalDate.parse(memEvent.date)
+                val today = java.time.LocalDate.now()
+                val weekStart = today.with(java.time.DayOfWeek.MONDAY)
+                val weekEnd = today.with(java.time.DayOfWeek.SUNDAY)
+                !eventDate.isBefore(weekStart) && !eventDate.isAfter(weekEnd)
+            } else false
+        }
+        return mapOf("exists" to exists)
+    }
+    
+    @GetMapping("/api/events/for-date")
+    @Operation(summary = "Get event details for a specific date")
+    fun getEventForDate(@RequestParam date: String): ResponseEntity<Map<String, Any>> {
+        val dbEvent = try {
+            eventDbService?.getEventForDate(date)
+        } catch (e: Exception) { null }
+        if (dbEvent != null) {
+            return ResponseEntity.ok(mapOf("id" to dbEvent.id, "name" to dbEvent.name))
+        }
+        // Fallback: check in-memory
+        val memEvent = attendanceService.getCurrentEvent()
+        return if (memEvent != null && memEvent.date == date) {
+            ResponseEntity.ok(mapOf("id" to memEvent.id, "name" to memEvent.name))
+        } else {
+            ResponseEntity.status(HttpStatus.NOT_FOUND).build()
+        }
+    }
+    
+    @PostMapping("/api/attendance/log")
+    @Operation(summary = "Log attendance record directly")
+    fun logAttendance(@RequestBody request: AttendanceLogRequest): ResponseEntity<Map<String, String>> {
+        val log = org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
+        // Try DB first
+        val dbError: Exception? = try {
+            eventDbService?.logAttendance(request)
+            null
+        } catch (e: Exception) {
+            log.warn("DB logAttendance failed ({}), falling back to in-memory", e.message)
+            e
+        }
+        if (dbError == null) {
+            return ResponseEntity.ok(mapOf("status" to "success", "message" to "Attendance logged successfully"))
+        }
+        // Fallback: record in in-memory service so it shows up in the report
+        return try {
+            val fallbackRequest = CheckInRequest(
+                name = request.attendeeName,
+                type = request.attendeeType,
+                currentTime = request.checkedInAt,
+                domain = ""
+            )
+            attendanceService.recordCheckIn(fallbackRequest)
+            ResponseEntity.ok(mapOf("status" to "success", "message" to "Attendance logged (in-memory)"))
+        } catch (e2: Exception) {
+            if (e2.message?.contains("已經簽到") == true) {
+                ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(mapOf("status" to "already_checked", "message" to (e2.message ?: "Already checked in")))
+            } else {
+                log.error("In-memory logAttendance also failed", e2)
+                ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(mapOf("status" to "error", "message" to (e2.message ?: "Failed to log attendance")))
+            }
+        }
+    }
+    
     @DeleteMapping("/api/events/clear-all")
     @Operation(summary = "Clear all events and attendance records")
     fun clearAllEventsAndAttendance(): Map<String, String> {
+        eventDbService?.clearAllEventsAndAttendance()
         attendanceService.clearAllEventsAndAttendance()
         return mapOf("status" to "success", "message" to "All events and attendance records cleared")
     }
@@ -140,7 +310,7 @@ class AttendanceController(
                 // Skip if not a valid member (not in members.csv)
                 if (!validMemberNames.contains(attendee.memberName)) continue
                 
-                val memberDomain = membersWithDomain.find { it["name"] == attendee.memberName }?.get("domain") ?: ""
+                val memberDomain = membersWithDomain.find { it["name"] == attendee.memberName }?.get("domain") as? String ?: ""
                 val domain = memberDomain.replace(",", "，")
                 val statusText = when (attendee.status) {
                     "on-time" -> "準時"
@@ -155,7 +325,7 @@ class AttendanceController(
                 // Skip if not a valid member (not in members.csv)
                 if (!validMemberNames.contains(absentee.memberName)) continue
                 
-                val memberDomain = membersWithDomain.find { it["name"] == absentee.memberName }?.get("domain") ?: ""
+                val memberDomain = membersWithDomain.find { it["name"] == absentee.memberName }?.get("domain") as? String ?: ""
                 val domain = memberDomain.replace(",", "，")
                 writer.println("${absentee.memberName},${domain},member,缺席,")
             }

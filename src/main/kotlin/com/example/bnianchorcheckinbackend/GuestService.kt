@@ -42,9 +42,10 @@ class GuestService {
                 val dateStr = filename.substringAfter("guest-event-").substringBefore(".csv")
                 try {
                     val fileDate = LocalDate.parse(dateStr, dateFormatter)
-                    // Only load if the file date is today or in the future
-                    if (fileDate.isBefore(today)) {
-                        println("Skipping old guest file: $filename")
+                    // Only skip files that are more than 7 days old
+                    val sevenDaysAgo = today.minusDays(7)
+                    if (fileDate.isBefore(sevenDaysAgo)) {
+                        println("Skipping old guest file (>7 days): $filename")
                         continue
                     }
                 } catch (e: Exception) {

@@ -178,7 +178,7 @@ class AttendanceService(
         return csvService.getAllMembers()
     }
 
-    fun getMembersWithDomain(): List<Map<String, String>> {
+    fun getMembersWithDomain(): List<Map<String, Any>> {
         return csvService.getAllMembersWithDomain()
     }
     
@@ -188,10 +188,10 @@ class AttendanceService(
             id = eventId,
             name = event.name,
             date = event.date,
-            startTime = event.startTime,
-            endTime = event.endTime,
             registrationStartTime = event.registrationStartTime,
+            startTime = event.startTime,
             onTimeCutoff = event.onTimeCutoff,
+            endTime = event.endTime,
             createdAt = LocalDateTime.now().toString()
         )
         events.add(eventData)

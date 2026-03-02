@@ -1,5 +1,6 @@
 package com.example.bnianchorcheckinbackend
 
+import com.example.bnianchorcheckinbackend.entities.MemberStanding
 import org.springframework.stereotype.Service
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -11,7 +12,8 @@ data class MemberData(
     val domain: String,
     val type: String,
     val membershipId: String?,
-    val referrer: String?
+    val referrer: String?,
+    val standing: MemberStanding = MemberStanding.GREEN
 )
 
 @Service
@@ -67,10 +69,14 @@ class CsvService {
         return members.values.map { it.name }.sorted()
     }
 
-    fun getAllMembersWithDomain(): List<Map<String, String>> {
+    fun getAllMembersWithDomain(): List<Map<String, Any>> {
         return members.values
             .sortedBy { it.name }
-            .map { mapOf("name" to it.name, "domain" to it.domain) }
+            .map { mapOf(
+                "name" to it.name, 
+                "domain" to it.domain,
+                "standing" to it.standing.name
+            ) }
     }
     
     /**
