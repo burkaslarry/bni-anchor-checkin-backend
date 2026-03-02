@@ -22,7 +22,7 @@ data class Guest(
     @Column
     var email: String? = null,
 
-    @Column(name = "phone_number")
+    @Column(name = "phone")
     var phoneNumber: String? = null,
 
     @Column(name = "event_date")

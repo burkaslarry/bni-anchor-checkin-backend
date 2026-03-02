@@ -25,10 +25,8 @@ class EventDbService(
 ) {
     @Transactional
     private fun ensureAbsentRowsForAllMembers(eventId: Int, eventDate: LocalDate) {
-        val existingNames = attendanceRepository.findByEventId(eventId).map { it.memberName }.toSet()
         val allMemberNames = databaseMemberService.getAllMembers().map { it["name"] as String }.toSet()
         for (memberName in allMemberNames) {
-            if (memberName in existingNames) continue
             attendanceRepository.save(
                 Attendance(
                     eventId = eventId,
@@ -44,6 +42,33 @@ class EventDbService(
 
     //Custom: remember to change default time zone
     private val hkt = ZoneId.of("Asia/Hong_Kong")
+
+    private fun normalizeStatus(status: String?): String {
+        val s = (status ?: "").trim()
+        return when (s) {
+            "on-time", "late", "absent", "late_with_code" -> s
+            "準時" -> "on-time"
+            "遲到" -> "late"
+            "缺席" -> "absent"
+            "遲到(有代碼)" -> "late_with_code"
+            else -> "absent"
+        }
+    }
+
+    private fun parseCheckInTime(value: String?): LocalTime? {
+        if (value.isNullOrBlank()) return null
+        val v = value.trim()
+        return try {
+            when {
+                v.contains("T") -> Instant.parse(v).atZone(hkt).toLocalTime()
+                Regex("^\\d{2}:\\d{2}:\\d{2}$").matches(v) -> LocalTime.parse(v, DateTimeFormatter.ofPattern("HH:mm:ss"))
+                Regex("^\\d{2}:\\d{2}$").matches(v) -> LocalTime.parse(v, DateTimeFormatter.ofPattern("HH:mm"))
+                else -> null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun parseTime(s: String): LocalTime {
         val trimmed = s.trim()
@@ -199,64 +224,70 @@ class EventDbService(
             null
         }
     }
-    
-    @Transactional
-    fun logAttendance(request: AttendanceLogRequest) {
-        val eventDate = LocalDate.parse(request.eventDate)
-        val event = eventRepository.findByEventDate(eventDate)
-            ?: throw IllegalArgumentException("找不到活動日期 ${request.eventDate} 的活動")
-        val eventId = event.id!!.toInt()
-
-        val role = if (request.attendeeType.equals("member", ignoreCase = true)) "MEMBER" else "GUEST"
-        val status = when (request.status) {
-            "on-time", "late", "absent", "late_with_code" -> request.status
-            else -> "on-time"
-        }
-        val checkInTime = try {
-            Instant.parse(request.checkedInAt).atZone(hkt).toLocalTime()
-        } catch (_: Exception) {
-            LocalTime.now(hkt)
-        }
-
-        val existing = attendanceRepository.findByEventIdAndMemberName(eventId, request.attendeeName)
-        if (existing != null) {
-            if (existing.checkInTime != null) {
-                throw IllegalArgumentException("${request.attendeeName} 已經簽到過了")
-            }
-            existing.status = status
-            existing.checkInTime = checkInTime
-            existing.role = role
-            attendanceRepository.save(existing)
-        } else {
-            val att = Attendance(
-                eventId = eventId,
-                eventDate = eventDate,
-                memberName = request.attendeeName,
-                status = status,
-                checkInTime = checkInTime,
-                role = role
-            )
-            attendanceRepository.save(att)
-        }
-
-        // Also write to legacy attendance_logs for backward compatibility
-        val attendanceLog = com.example.bnianchorcheckinbackend.entities.AttendanceLog(
-            attendeeId = request.attendeeId ?: 0,
-            attendeeType = request.attendeeType,
-            attendeeName = request.attendeeName,
-            eventDate = request.eventDate,
-            checkedInAt = Instant.parse(request.checkedInAt),
-            status = status
-        )
-        try {
-            attendanceLogRepository.save(attendanceLog)
-        } catch (_: Exception) { /* ignore duplicate in legacy table */ }
-    }
-
+ 
     @Transactional
     fun clearAllEventsAndAttendance() {
         attendanceLogRepository.deleteAll()
         attendanceRepository.deleteAll()
         eventRepository.deleteAll()
+    }
+
+    /**
+     * Called by /api/export: ensure current event attendance rows are persisted in DB in batch.
+     * This guarantees the export step also upserts records into bni_anchor_attendances.
+     */
+    @Transactional
+    fun batchUpsertCurrentEventAttendancesForExport(
+        reportData: ReportData?,
+        records: List<CheckInRecord>
+    ) {
+        val event = eventRepository.findTopByOrderByEventDateDesc() ?: return
+        val eventId = event.id!!.toInt()
+        val eventDate = event.eventDate
+
+        // Always make sure all members exist as absent baseline rows.
+        ensureAbsentRowsForAllMembers(eventId, eventDate)
+        
+        val byName = attendanceRepository.findByEventId(eventId).associateBy { it.memberName }.toMutableMap()
+
+        fun upsert(name: String, status: String, checkInTime: LocalTime?, role: String) {
+            val existing = byName[name]
+            if (existing != null) {
+                existing.status = normalizeStatus(status)
+                if (checkInTime != null) {
+                    existing.checkInTime = checkInTime
+                }
+                existing.role = role
+            } else {
+                byName[name] = Attendance(
+                    eventId = eventId,
+                    eventDate = eventDate,
+                    memberName = name,
+                    status = normalizeStatus(status),
+                    checkInTime = checkInTime,
+                    role = role
+                )
+            }
+        }
+
+        // Upsert from report data first (members + guests + absentees)
+        if (reportData != null) {
+            for (a in reportData.attendees) {
+                val role = (a.role ?: "MEMBER").uppercase()
+                upsert(a.memberName, a.status, parseCheckInTime(a.checkInTime), role)
+            }
+            for (a in reportData.absentees) {
+                upsert(a.memberName, "absent", null, "MEMBER")
+            }
+        }
+
+        // Upsert from in-memory records as fallback/additional source (especially guest rows)
+        for (r in records) {
+            val role = if (r.type.equals("guest", ignoreCase = true)) "GUEST" else "MEMBER"
+            val status = if (role == "GUEST") "on-time" else "on-time"
+            upsert(r.name, status, parseCheckInTime(r.timestamp), role)
+        }
+
+        attendanceRepository.saveAll(byName.values.toList())
     }
 }

@@ -31,6 +31,36 @@ class AttendanceController(
     @Autowired(required = false) private val databaseMemberService: DatabaseMemberService?,
     @Autowired(required = false) private val eventDbService: EventDbService?
 ) {
+    private val log = org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
+
+    private fun <T> withDbRetry(
+        operation: String,
+        maxAttempts: Int = 3,
+        block: () -> T
+    ): T {
+        val delays = listOf(0L, 1000L, 3000L)
+        var lastError: Exception? = null
+        for (attempt in 1..maxAttempts) {
+            val delay = delays.getOrElse(attempt - 1) { 3000L } + kotlin.random.Random.nextLong(0, 300)
+            if (delay > 0) {
+                try {
+                    Thread.sleep(delay)
+                } catch (ie: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw RuntimeException("Retry interrupted for $operation", ie)
+                }
+            }
+            try {
+                return block()
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt < maxAttempts) {
+                    log.warn("DB {} failed (attempt {}/{}): {}", operation, attempt, maxAttempts, e.message)
+                }
+            }
+        }
+        throw lastError ?: RuntimeException("DB $operation failed after retries")
+    }
 
     @PostMapping("/api/attendance/scan")
     @Operation(summary = "Record attendance using a QR payload.")
@@ -46,13 +76,12 @@ class AttendanceController(
     @GetMapping("/api/members")
     @Operation(summary = "Get list of members with domain info and standing")
     fun getMembers(): Map<String, List<Map<String, Any>>> {
-        val log = org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
         val csvFallback: List<Map<String, Any>> = attendanceService.getMembersWithDomain()
             .mapIndexed { idx, m -> m + ("id" to (m["id"] ?: (idx + 1))) }
         return try {
             if (databaseMemberService != null) {
                 try {
-                    val dbMembers = databaseMemberService.getAllMembers()
+                    val dbMembers = withDbRetry("getMembers") { databaseMemberService.getAllMembers() }
                     if (dbMembers.isNotEmpty()) mapOf("members" to dbMembers)
                     else mapOf("members" to csvFallback)
                 } catch (e: Exception) {
@@ -74,7 +103,7 @@ class AttendanceController(
         // Try to get from PostgreSQL database first, fallback to CSV
         return if (databaseMemberService != null) {
             try {
-                val dbGuests = databaseMemberService.getAllGuests()
+                val dbGuests = withDbRetry("getGuests") { databaseMemberService.getAllGuests() }
                 if (dbGuests.isNotEmpty()) {
                     mapOf("guests" to dbGuests)
                 } else {
@@ -129,11 +158,10 @@ class AttendanceController(
     @PostMapping("/api/events")
     @Operation(summary = "Create event with time settings, initializes all members as absent")
     fun createEvent(@RequestBody request: EventRequest): ResponseEntity<Map<String, Any>> {
-        val log = org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
         return try {
             val eventData = if (eventDbService != null) {
                 try {
-                    eventDbService.createEvent(request)
+                    withDbRetry("createEvent") { eventDbService.createEvent(request) }
                 } catch (dbEx: Exception) {
                     log.warn("DB createEvent failed ({}), falling back to in-memory", dbEx.message)
                     attendanceService.createEvent(request)
@@ -172,7 +200,7 @@ class AttendanceController(
     @Operation(summary = "Get report data for the current event")
     fun getReportData(): ResponseEntity<ReportData> {
         val reportData = try {
-            eventDbService?.getReportData()
+            if (eventDbService != null) withDbRetry("getReportData") { eventDbService.getReportData() } else null
         } catch (e: Exception) {
             org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
                 .warn("DB getReportData failed ({}), falling back to in-memory", e.message)
@@ -189,7 +217,7 @@ class AttendanceController(
     @Operation(summary = "Get current event")
     fun getCurrentEvent(): ResponseEntity<EventData> {
         val event = try {
-            eventDbService?.getCurrentEvent()
+            if (eventDbService != null) withDbRetry("getCurrentEvent") { eventDbService.getCurrentEvent() } else null
         } catch (e: Exception) {
             null
         } ?: attendanceService.getCurrentEvent()
@@ -204,7 +232,7 @@ class AttendanceController(
     @Operation(summary = "Check if event exists for a given date")
     fun checkEventExists(@RequestParam date: String): Map<String, Any> {
         val exists = try {
-            eventDbService?.hasEventForDate(date)
+            if (eventDbService != null) withDbRetry("checkEventExists") { eventDbService.hasEventForDate(date) } else null
         } catch (e: Exception) { null } ?: (attendanceService.getCurrentEvent()?.date == date)
         return mapOf("exists" to exists)
     }
@@ -213,7 +241,7 @@ class AttendanceController(
     @Operation(summary = "Check if event exists in the current week")
     fun checkEventThisWeek(): Map<String, Any> {
         val exists = try {
-            eventDbService?.hasEventThisWeek()
+            if (eventDbService != null) withDbRetry("checkEventThisWeek") { eventDbService.hasEventThisWeek() } else null
         } catch (e: Exception) { null } ?: run {
             val memEvent = attendanceService.getCurrentEvent()
             if (memEvent != null) {
@@ -231,7 +259,7 @@ class AttendanceController(
     @Operation(summary = "Get event details for a specific date")
     fun getEventForDate(@RequestParam date: String): ResponseEntity<Map<String, Any>> {
         val dbEvent = try {
-            eventDbService?.getEventForDate(date)
+            if (eventDbService != null) withDbRetry("getEventForDate") { eventDbService.getEventForDate(date) } else null
         } catch (e: Exception) { null }
         if (dbEvent != null) {
             return ResponseEntity.ok(mapOf("id" to dbEvent.id, "name" to dbEvent.name))
@@ -248,10 +276,9 @@ class AttendanceController(
     @PostMapping("/api/attendance/log")
     @Operation(summary = "Log attendance record directly")
     fun logAttendance(@RequestBody request: AttendanceLogRequest): ResponseEntity<Map<String, String>> {
-        val log = org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
         // Try DB first
         val dbError: Exception? = try {
-            eventDbService?.logAttendance(request)
+            if (eventDbService != null) withDbRetry("logAttendance") { eventDbService.logAttendance(request) }
             null
         } catch (e: Exception) {
             log.warn("DB logAttendance failed ({}), falling back to in-memory", e.message)
@@ -285,7 +312,11 @@ class AttendanceController(
     @DeleteMapping("/api/events/clear-all")
     @Operation(summary = "Clear all events and attendance records")
     fun clearAllEventsAndAttendance(): Map<String, String> {
-        eventDbService?.clearAllEventsAndAttendance()
+        try {
+            if (eventDbService != null) withDbRetry("clearAllEventsAndAttendance") { eventDbService.clearAllEventsAndAttendance() }
+        } catch (e: Exception) {
+            log.warn("DB clearAllEventsAndAttendance failed: {}", e.message)
+        }
         attendanceService.clearAllEventsAndAttendance()
         return mapOf("status" to "success", "message" to "All events and attendance records cleared")
     }
@@ -381,6 +412,18 @@ class AttendanceController(
 
         writer.flush()
         writer.close()
+
+        // After successful CSV export: take batch records (reportData + records),
+        // insert/upsert into bni_anchor_attendances via EventDbService (AttendanceRepository).
+        try {
+            if (eventDbService != null) {
+                withDbRetry("batchUpsertCurrentEventAttendancesForExport") {
+                    eventDbService.batchUpsertCurrentEventAttendancesForExport(reportData, records)
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("Post-export attendance batch upsert failed: {}", e.message)
+        }
 
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=attendance.csv")

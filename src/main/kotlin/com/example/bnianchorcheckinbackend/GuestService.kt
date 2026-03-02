@@ -1,6 +1,10 @@
 package com.example.bnianchorcheckinbackend
 
+import com.example.bnianchorcheckinbackend.entities.Guest
+import com.example.bnianchorcheckinbackend.repositories.GuestRepository
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -18,7 +22,9 @@ data class GuestData(
 )
 
 @Service
-class GuestService {
+class GuestService(
+    @Autowired(required = false) private val guestRepository: GuestRepository? = null
+) {
 
     private val guests = ConcurrentHashMap<String, GuestData>()
     private val guestFiles = mutableListOf<String>()
@@ -91,6 +97,7 @@ class GuestService {
         }
     }
 
+    @Transactional
     fun addBulkImportedGuests(records: List<ImportRecord>): ImportResult {
         var inserted = 0
         val errors = mutableListOf<String>()
@@ -98,13 +105,37 @@ class GuestService {
             try {
                 val eventDate = normalizeEventDate(record.eventDate) ?: ""
                 val key = "${record.name.lowercase()}|$eventDate"
-                bulkImportedGuests[key] = GuestData(
+                val sampleGuest = GuestData(
                     name = record.name,
                     profession = record.profession,
                     referrer = record.referrer?.takeIf { it.isNotBlank() } ?: "",
                     source = "bulk-import",
                     eventDate = eventDate.ifBlank { null }
                 )
+                bulkImportedGuests[key] = sampleGuest
+
+                // Single insert into bni_anchor_guests (name, profession, referrer, phone, event_date)
+                if (guestRepository != null) {
+                    val eventDateVal = eventDate.ifBlank { null }
+                    val existing = guestRepository.findByNameIgnoreCase(record.name).orElse(null)
+                    val guestEntity = if (existing != null) {
+                        existing.apply {
+                            profession = record.profession
+                            referrer = record.referrer?.takeIf { it.isNotBlank() }
+                            phoneNumber = record.phoneNumber?.takeIf { it.isNotBlank() }
+                            this.eventDate = eventDateVal
+                        }
+                    } else {
+                        Guest(
+                            name = record.name,
+                            profession = record.profession,
+                            referrer = record.referrer?.takeIf { it.isNotBlank() },
+                            phoneNumber = record.phoneNumber?.takeIf { it.isNotBlank() },
+                            eventDate = eventDateVal
+                        )
+                    }
+                    guestRepository.save(guestEntity)
+                }
                 inserted++
             } catch (e: Exception) {
                 errors.add("Failed to add ${record.name}: ${e.message}")
@@ -112,4 +143,6 @@ class GuestService {
         }
         return ImportResult(total = records.size, inserted = inserted, updated = 0, failed = records.size - inserted, errors = errors)
     }
+
+   
 }
