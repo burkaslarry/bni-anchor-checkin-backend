@@ -17,6 +17,7 @@ data class AttendanceLogRequest(
     val attendeeId: Int?,
     val attendeeType: String,
     val attendeeName: String,
+    val attendeeProfession: String? = null,
     val eventDate: String,
     val checkedInAt: String,
     val status: String
@@ -265,7 +266,7 @@ class AttendanceController(
                 name = request.attendeeName,
                 type = request.attendeeType,
                 currentTime = request.checkedInAt,
-                domain = ""
+                domain = request.attendeeProfession ?: ""
             )
             attendanceService.recordCheckIn(fallbackRequest)
             ResponseEntity.ok(mapOf("status" to "success", "message" to "Attendance logged (in-memory)"))
