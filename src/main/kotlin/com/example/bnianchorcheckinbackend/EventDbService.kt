@@ -224,6 +224,43 @@ class EventDbService(
             null
         }
     }
+
+    @Transactional
+    fun logAttendance(request: com.example.bnianchorcheckinbackend.AttendanceLogRequest) {
+        val eventDate = try {
+            LocalDate.parse(request.eventDate)
+        } catch (e: Exception) {
+            return
+        }
+        val event = eventRepository.findByEventDate(eventDate) ?: return
+        val eventId = event.id!!.toInt()
+        ensureAbsentRowsForAllMembers(eventId, eventDate)
+        val role = when (request.attendeeType.lowercase()) {
+            "guest" -> "GUEST"
+            "vip" -> "VIP"
+            "speaker" -> "SPEAKER"
+            else -> "MEMBER"
+        }
+        val existing = attendanceRepository.findByEventIdAndMemberName(eventId, request.attendeeName)
+        val checkInTime = parseCheckInTime(request.checkedInAt)
+        if (existing != null) {
+            existing.status = normalizeStatus(request.status)
+            if (checkInTime != null) existing.checkInTime = checkInTime
+            existing.role = role
+            attendanceRepository.save(existing)
+        } else {
+            attendanceRepository.save(
+                Attendance(
+                    eventId = eventId,
+                    eventDate = eventDate,
+                    memberName = request.attendeeName,
+                    status = normalizeStatus(request.status),
+                    checkInTime = checkInTime,
+                    role = role
+                )
+            )
+        }
+    }
  
     @Transactional
     fun clearAllEventsAndAttendance() {
