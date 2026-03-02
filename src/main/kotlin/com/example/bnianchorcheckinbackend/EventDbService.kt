@@ -1,13 +1,18 @@
 package com.example.bnianchorcheckinbackend
 
+import com.example.bnianchorcheckinbackend.entities.Attendance
 import com.example.bnianchorcheckinbackend.entities.Event
 import com.example.bnianchorcheckinbackend.repositories.AttendanceLogRepository
+import com.example.bnianchorcheckinbackend.repositories.AttendanceRepository
 import com.example.bnianchorcheckinbackend.repositories.EventRepository
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
 @Service
@@ -15,8 +20,30 @@ import java.time.format.DateTimeFormatter
 class EventDbService(
     private val eventRepository: EventRepository,
     private val attendanceLogRepository: AttendanceLogRepository,
+    private val attendanceRepository: AttendanceRepository,
     private val databaseMemberService: DatabaseMemberService
 ) {
+    @Transactional
+    private fun ensureAbsentRowsForAllMembers(eventId: Int, eventDate: LocalDate) {
+        val existingNames = attendanceRepository.findByEventId(eventId).map { it.memberName }.toSet()
+        val allMemberNames = databaseMemberService.getAllMembers().map { it["name"] as String }.toSet()
+        for (memberName in allMemberNames) {
+            if (memberName in existingNames) continue
+            attendanceRepository.save(
+                Attendance(
+                    eventId = eventId,
+                    eventDate = eventDate,
+                    memberName = memberName,
+                    status = "absent",
+                    checkInTime = null,
+                    role = "MEMBER"
+                )
+            )
+        }
+    }
+
+    //Custom: remember to change default time zone
+    private val hkt = ZoneId.of("Asia/Hong_Kong")
 
     private fun parseTime(s: String): LocalTime {
         val trimmed = s.trim()
@@ -42,10 +69,10 @@ class EventDbService(
         val regStartTime = parseTime(request.registrationStartTime)
         val onTimeCutoff = parseTime(request.onTimeCutoff)
 
-        val nowIso = java.time.Instant.now().toString()
+        val nowIso = ZonedDateTime.now(hkt).toInstant().toString()
         val event = Event(
             name = request.name,
-            createDate = LocalDate.now(),
+            createDate = LocalDate.now(hkt),
             eventDate = eventDate,
             startTime = startTime,
             endTime = endTime,
@@ -55,6 +82,11 @@ class EventDbService(
             lateCutoffTime = null
         )
         val saved = eventRepository.save(event)
+        val eventId = saved.id!!.toInt()
+        val eventDateLocal = saved.eventDate
+
+        // Insert all members as absent in bni_anchor_attendances
+        ensureAbsentRowsForAllMembers(eventId, eventDateLocal)
 
         return EventData(
             id = saved.id!!.toInt(),
@@ -71,22 +103,26 @@ class EventDbService(
     fun getReportData(): ReportData? {
         val event = eventRepository.findTopByOrderByEventDateDesc() ?: return null
         val eventDateStr = event.eventDate.toString()
+        val eventId = event.id!!.toInt()
+
+        // Backfill any missing absent rows for older events
+        ensureAbsentRowsForAllMembers(eventId, event.eventDate)
 
         val members = databaseMemberService.getAllMembers().map { it["name"] as String }
-        val logs = attendanceLogRepository.findByEventDate(eventDateStr)
+        val attendances = attendanceRepository.findByEventId(eventId)
 
-        val checkedInNames = logs.map { it.attendeeName }.toSet()
-        val attendees = logs.map { log ->
-            AttendanceRecord(
-                memberName = log.attendeeName,
-                status = log.status,
-                checkInTime = java.time.Instant.ofEpochMilli(log.checkedInAt.toEpochMilli())
-                    .atZone(java.time.ZoneId.systemDefault())
-                    .toLocalTime()
-                    .format(DateTimeFormatter.ofPattern("HH:mm:ss")),
-                role = if (log.attendeeType == "member") "MEMBER" else "GUEST"
-            )
-        }.sortedByDescending { it.checkInTime }
+        val checkedInNames = attendances.filter { it.checkInTime != null }.map { it.memberName }.toSet()
+        val attendees = attendances
+            .filter { it.checkInTime != null }
+            .map { att ->
+                AttendanceRecord(
+                    memberName = att.memberName,
+                    status = att.status,
+                    checkInTime = att.checkInTime?.format(DateTimeFormatter.ofPattern("HH:mm:ss")),
+                    role = att.role ?: "MEMBER"
+                )
+            }
+            .sortedByDescending { it.checkInTime ?: "" }
 
         val absentees = members
             .filter { it !in checkedInNames }
@@ -125,12 +161,12 @@ class EventDbService(
             endTime = event.endTime?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "09:00",
             registrationStartTime = event.registrationStartTime?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "06:30",
             onTimeCutoff = event.onTimeCutoffTime?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "07:05",
-            createdAt = java.time.LocalDateTime.now().toString()
+            createdAt = ZonedDateTime.now(hkt).toString()
         )
     }
 
     fun hasEventThisWeek(): Boolean {
-        val now = LocalDate.now()
+        val now = LocalDate.now(hkt)
         val startOfWeek = now.minusDays(now.dayOfWeek.value.toLong() - 1)
         val endOfWeek = startOfWeek.plusDays(6)
         return eventRepository.existsByEventDateBetween(startOfWeek, endOfWeek)
@@ -166,28 +202,61 @@ class EventDbService(
     
     @Transactional
     fun logAttendance(request: AttendanceLogRequest) {
-        // Check for duplicate check-in
-        val existing = attendanceLogRepository.findByEventDate(request.eventDate)
-            .find { it.attendeeId == request.attendeeId && it.attendeeType == request.attendeeType }
-        
-        if (existing != null) {
-            throw IllegalArgumentException("${request.attendeeName} 已經簽到過了")
+        val eventDate = LocalDate.parse(request.eventDate)
+        val event = eventRepository.findByEventDate(eventDate)
+            ?: throw IllegalArgumentException("找不到活動日期 ${request.eventDate} 的活動")
+        val eventId = event.id!!.toInt()
+
+        val role = if (request.attendeeType.equals("member", ignoreCase = true)) "MEMBER" else "GUEST"
+        val status = when (request.status) {
+            "on-time", "late", "absent", "late_with_code" -> request.status
+            else -> "on-time"
         }
-        
+        val checkInTime = try {
+            Instant.parse(request.checkedInAt).atZone(hkt).toLocalTime()
+        } catch (_: Exception) {
+            LocalTime.now(hkt)
+        }
+
+        val existing = attendanceRepository.findByEventIdAndMemberName(eventId, request.attendeeName)
+        if (existing != null) {
+            if (existing.checkInTime != null) {
+                throw IllegalArgumentException("${request.attendeeName} 已經簽到過了")
+            }
+            existing.status = status
+            existing.checkInTime = checkInTime
+            existing.role = role
+            attendanceRepository.save(existing)
+        } else {
+            val att = Attendance(
+                eventId = eventId,
+                eventDate = eventDate,
+                memberName = request.attendeeName,
+                status = status,
+                checkInTime = checkInTime,
+                role = role
+            )
+            attendanceRepository.save(att)
+        }
+
+        // Also write to legacy attendance_logs for backward compatibility
         val attendanceLog = com.example.bnianchorcheckinbackend.entities.AttendanceLog(
             attendeeId = request.attendeeId ?: 0,
             attendeeType = request.attendeeType,
             attendeeName = request.attendeeName,
             eventDate = request.eventDate,
-            checkedInAt = java.time.Instant.parse(request.checkedInAt),
-            status = request.status
+            checkedInAt = Instant.parse(request.checkedInAt),
+            status = status
         )
-        attendanceLogRepository.save(attendanceLog)
+        try {
+            attendanceLogRepository.save(attendanceLog)
+        } catch (_: Exception) { /* ignore duplicate in legacy table */ }
     }
 
     @Transactional
     fun clearAllEventsAndAttendance() {
         attendanceLogRepository.deleteAll()
+        attendanceRepository.deleteAll()
         eventRepository.deleteAll()
     }
 }

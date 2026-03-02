@@ -27,7 +27,7 @@ data class AttendanceLogRequest(
 class AttendanceController(
     private val attendanceService: AttendanceService,
     private val guestService: GuestService,
-    private val databaseMemberService: DatabaseMemberService?,
+    @Autowired(required = false) private val databaseMemberService: DatabaseMemberService?,
     @Autowired(required = false) private val eventDbService: EventDbService?
 ) {
 
@@ -45,23 +45,25 @@ class AttendanceController(
     @GetMapping("/api/members")
     @Operation(summary = "Get list of members with domain info and standing")
     fun getMembers(): Map<String, List<Map<String, Any>>> {
-        // Try to get from PostgreSQL database first, fallback to CSV
-        return if (databaseMemberService != null) {
-            try {
-                val dbMembers = databaseMemberService.getAllMembers()
-                if (dbMembers.isNotEmpty()) {
-                    mapOf("members" to dbMembers)
-                } else {
-                    // Fallback to CSV if database is empty
-                    mapOf("members" to attendanceService.getMembersWithDomain())
+        val log = org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
+        val csvFallback: List<Map<String, Any>> = attendanceService.getMembersWithDomain()
+            .mapIndexed { idx, m -> m + ("id" to (m["id"] ?: (idx + 1))) }
+        return try {
+            if (databaseMemberService != null) {
+                try {
+                    val dbMembers = databaseMemberService.getAllMembers()
+                    if (dbMembers.isNotEmpty()) mapOf("members" to dbMembers)
+                    else mapOf("members" to csvFallback)
+                } catch (e: Exception) {
+                    log.warn("DB getMembers failed ({}), using CSV fallback", e.message)
+                    mapOf("members" to csvFallback)
                 }
-            } catch (e: Exception) {
-                // Fallback to CSV on any database error
-                mapOf("members" to attendanceService.getMembersWithDomain())
+            } else {
+                mapOf("members" to csvFallback)
             }
-        } else {
-            // Use CSV if database service is not available
-            mapOf("members" to attendanceService.getMembersWithDomain())
+        } catch (e: Exception) {
+            log.error("getMembers failed", e)
+            mapOf("members" to csvFallback)
         }
     }
 
@@ -288,55 +290,85 @@ class AttendanceController(
     }
 
     @GetMapping("/api/export")
-    @Operation(summary = "Export records as CSV with attendance status")
+    @Operation(summary = "Export records as CSV with attendance status (current event, all 47 members including absent)")
     fun exportRecords(): ResponseEntity<ByteArray> {
         val out = ByteArrayOutputStream()
         // Add UTF-8 BOM for Excel compatibility
         out.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
         val writer = PrintWriter(out)
         writer.println("姓名,專業領域,類別,出席狀態,簽到時間")
-        
-        // Get current event's attendance data
-        val reportData = attendanceService.getReportData()
+
+        // Prefer DB report (event_id, event_date, all bni_anchor_members including absent)
+        val reportData = try {
+            eventDbService?.getReportData()
+        } catch (e: Exception) {
+            org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
+                .warn("DB getReportData failed ({}), using in-memory", e.message)
+            null
+        } ?: attendanceService.getReportData()
+
         val records = attendanceService.getAllRecords()
-        
+
         if (reportData != null) {
-            // Export all members with their status from the event attendance
-            val membersWithDomain = attendanceService.getMembersWithDomain()
-            val validMemberNames = membersWithDomain.map { it["name"] }.toSet()
-            
-            // Combine attendees and absentees (only valid members)
+            // Members: prefer DB (47 from bni_anchor_members), fallback to CSV
+            val membersWithDomain = try {
+                databaseMemberService?.getAllMembers()?.map { m ->
+                    mapOf("name" to (m["name"] as String), "domain" to (m["domain"] as? String ?: ""))
+                } ?: attendanceService.getMembersWithDomain()
+            } catch (_: Exception) {
+                attendanceService.getMembersWithDomain()
+            }
+            val memberDomainMap = membersWithDomain.associate { (it["name"] as String) to (it["domain"] as? String ?: "") }
+
+            // Export all members who attended (from reportData.attendees where role=MEMBER)
             for (attendee in reportData.attendees) {
-                // Skip if not a valid member (not in members.csv)
-                if (!validMemberNames.contains(attendee.memberName)) continue
-                
-                val memberDomain = membersWithDomain.find { it["name"] == attendee.memberName }?.get("domain") as? String ?: ""
-                val domain = memberDomain.replace(",", "，")
+                if (attendee.role != "MEMBER") continue
+                val domain = (memberDomainMap[attendee.memberName] ?: "").replace(",", "，")
+                val statusText = when (attendee.status) {
+                    "on-time" -> "準時"
+                    "late" -> "遲到"
+                    "late_with_code" -> "遲到(有代碼)"
+                    else -> attendee.status
+                }
+                writer.println("${attendee.memberName},${domain},member,${statusText},${attendee.checkInTime ?: ""}")
+            }
+
+            // Export all absent members (HARD RULE: include remaining absent members)
+            for (absentee in reportData.absentees) {
+                val domain = (memberDomainMap[absentee.memberName] ?: "").replace(",", "，")
+                writer.println("${absentee.memberName},${domain},member,缺席,")
+            }
+
+            // Export guests with profession (prefer DB bni_anchor_guests, fallback to CSV/in-memory)
+            val guestDomainMap = try {
+                databaseMemberService?.getAllGuests()
+                    ?.associate { g -> (g["name"] ?: "") to (g["profession"] ?: "") }
+                    ?.filterKeys { it.isNotBlank() }
+                    ?: guestService.getAllGuestsWithDomain().associate {
+                        (it["name"] as String) to (it["profession"] as? String ?: "")
+                    }
+            } catch (_: Exception) {
+                guestService.getAllGuestsWithDomain().associate {
+                    (it["name"] as String) to (it["profession"] as? String ?: "")
+                }
+            }
+            for (attendee in reportData.attendees) {
+                if (attendee.role != "GUEST") continue
+                val domain = (guestDomainMap[attendee.memberName] ?: "").replace(",", "，")
                 val statusText = when (attendee.status) {
                     "on-time" -> "準時"
                     "late" -> "遲到"
                     else -> attendee.status
                 }
-                val checkInTime = attendee.checkInTime ?: ""
-                writer.println("${attendee.memberName},${domain},member,${statusText},${checkInTime}")
+                writer.println("${attendee.memberName},${domain},guest,${statusText},${attendee.checkInTime ?: ""}")
             }
-            
-            for (absentee in reportData.absentees) {
-                // Skip if not a valid member (not in members.csv)
-                if (!validMemberNames.contains(absentee.memberName)) continue
-                
-                val memberDomain = membersWithDomain.find { it["name"] == absentee.memberName }?.get("domain") as? String ?: ""
-                val domain = memberDomain.replace(",", "，")
-                writer.println("${absentee.memberName},${domain},member,缺席,")
-            }
-            
-            // Export guests from check-in records
-            val guests = records.filter { it.type.equals("guest", ignoreCase = true) }
-            for (guest in guests) {
-                val domain = guest.domain.replace(",", "，")
-                // Determine guest status based on timestamp and cutoff
-                val guestStatus = determineGuestStatus(guest.timestamp, reportData.onTimeCutoff)
-                writer.println("${guest.name},${domain},guest,${guestStatus},${guest.timestamp}")
+            // If DB report has no guest records, fallback to in-memory check-in records
+            if (reportData.attendees.none { it.role == "GUEST" }) {
+                for (guest in records.filter { it.type.equals("guest", ignoreCase = true) }) {
+                    val domain = guest.domain.replace(",", "，")
+                    val guestStatus = determineGuestStatus(guest.timestamp, reportData.onTimeCutoff)
+                    writer.println("${guest.name},${domain},guest,${guestStatus},${guest.timestamp}")
+                }
             }
         } else {
             // Fallback: export raw records if no event exists
@@ -345,7 +377,7 @@ class AttendanceController(
                 writer.println("${record.name},${domain},${record.type},已簽到,${record.timestamp}")
             }
         }
-        
+
         writer.flush()
         writer.close()
 
