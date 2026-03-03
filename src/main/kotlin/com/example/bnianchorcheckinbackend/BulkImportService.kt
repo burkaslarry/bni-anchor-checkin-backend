@@ -7,7 +7,6 @@ import com.example.bnianchorcheckinbackend.repositories.GuestRepository
 import com.example.bnianchorcheckinbackend.repositories.MemberRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.LocalDateTime
 
 data class BulkImportRequest(
     val type: String, // "member" or "guest"
@@ -72,7 +71,6 @@ class BulkImportService(
                     } catch (e: Exception) {
                         MemberStanding.GREEN
                     }
-                    member.updatedAt = LocalDateTime.now()
                     memberRepository.save(member)
                     updated++
                 } else {
@@ -131,7 +129,6 @@ class BulkImportService(
                     guest.email = record.email?.takeIf { it.isNotBlank() }
                     guest.phoneNumber = record.phoneNumber?.takeIf { it.isNotBlank() }
                     guest.eventDate = record.eventDate?.takeIf { it.isNotBlank() }
-                    guest.updatedAt = LocalDateTime.now()
                     guestRepository.save(guest)
                     updated++
                 } else {

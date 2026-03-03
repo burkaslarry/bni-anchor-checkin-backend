@@ -15,7 +15,10 @@ data class Event(
     var name: String,
 
     @Column(name = "create_date", nullable = false)
-    var createDate: LocalDate = java.time.LocalDate.now(),
+    var createDate: LocalDate = LocalDate.now(),
+
+    @Column(name = "registration_start_time", nullable = false)
+    var registrationStartTime: LocalTime,
 
     @Column(name = "event_date", nullable = false)
     var eventDate: LocalDate,
@@ -26,14 +29,8 @@ data class Event(
     @Column(name = "end_time")
     var endTime: LocalTime? = null,
 
-    @Column(name = "created_at")
-    var createdAt: String? = null,
-
-    @Column(name = "registration_start_time")
-    var registrationStartTime: LocalTime? = null,
-
-    @Column(name = "on_time_cutoff_time")
-    var onTimeCutoffTime: LocalTime? = null,
+    @Column(name = "on_time_cutoff_time", nullable = false)
+    var onTimeCutoffTime: LocalTime,
 
     @Column(name = "late_cutoff_time")
     var lateCutoffTime: LocalTime? = null

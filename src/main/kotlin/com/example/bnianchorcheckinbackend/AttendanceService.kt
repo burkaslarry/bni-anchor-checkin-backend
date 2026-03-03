@@ -77,7 +77,7 @@ class AttendanceService(
     }
 
     fun recordCheckIn(request: CheckInRequest): String {
-        if (request.type.lowercase() !in listOf("guest", "member")) {
+        if (request.type.lowercase() !in listOf("guest", "member", "vip", "speaker")) {
             throw IllegalArgumentException("Invalid user type")
         }
 
@@ -102,21 +102,26 @@ class AttendanceService(
 
         val now = LocalDateTime.now()
         
-        // Parse client's current time for accurate check-in time
+        val hkt = java.time.ZoneId.of("Asia/Hong_Kong")
         val clientTime = try {
-            // Parse ISO format with timezone (e.g., "2025-12-03T13:09:09.000Z" or "2025-12-03T13:09:09+08:00")
-            java.time.ZonedDateTime.parse(request.currentTime).toLocalDateTime()
+            java.time.ZonedDateTime.parse(request.currentTime).withZoneSameInstant(hkt).toLocalDateTime()
         } catch (e: Exception) {
             try {
-                // Try parsing as LocalDateTime
-                LocalDateTime.parse(request.currentTime.replace("Z", ""))
+                java.time.Instant.parse(request.currentTime).atZone(hkt).toLocalDateTime()
             } catch (e2: Exception) {
-                // Fallback to server time
-                now
+                try { LocalDateTime.parse(request.currentTime.replace("Z", "")) }
+                catch (_: Exception) { now }
             }
         }
-        
-        // Determine role based on type and request
+
+        val hktTimestamp = try {
+            val hktFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
+            java.time.ZonedDateTime.parse(request.currentTime).withZoneSameInstant(hkt).format(hktFmt)
+        } catch (_: Exception) {
+            try { java.time.Instant.parse(request.currentTime).atZone(hkt).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")) }
+            catch (_: Exception) { request.currentTime }
+        }
+
         val role = when {
             request.type.equals("member", ignoreCase = true) -> "MEMBER"
             request.role.uppercase() in listOf("VIP", "SPEAKER") -> request.role.uppercase()
@@ -127,7 +132,7 @@ class AttendanceService(
             name = request.name,
             type = request.type.lowercase(),
             domain = domain,
-            timestamp = request.currentTime,
+            timestamp = hktTimestamp,
             receivedAt = now.toString(),
             role = role,
             tags = request.tags,

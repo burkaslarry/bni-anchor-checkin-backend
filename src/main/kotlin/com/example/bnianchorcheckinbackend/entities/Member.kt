@@ -1,7 +1,7 @@
 package com.example.bnianchorcheckinbackend.entities
 
 import jakarta.persistence.*
-import java.time.LocalDateTime
+import java.time.OffsetDateTime
 
 @Entity
 @Table(name = "bni_anchor_members")
@@ -35,11 +35,11 @@ data class Member(
     @Enumerated(EnumType.STRING)
     var standing: MemberStanding = MemberStanding.GREEN,
 
-    @Column(name = "created_at")
-    var createdAt: LocalDateTime = LocalDateTime.now(),
+    @Column(name = "created_at", insertable = false, updatable = false)
+    var createdAt: OffsetDateTime? = null,
 
-    @Column(name = "updated_at")
-    var updatedAt: LocalDateTime = LocalDateTime.now()
+    @Column(name = "updated_at", insertable = false, updatable = false)
+    var updatedAt: OffsetDateTime? = null
 )
 
 enum class MemberStanding {

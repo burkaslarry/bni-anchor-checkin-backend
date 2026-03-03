@@ -9,7 +9,6 @@ import com.example.bnianchorcheckinbackend.repositories.ProfessionGroupRepositor
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.LocalDateTime
 
 @Service
 @ConditionalOnProperty(name = ["spring.datasource.url"])
@@ -68,7 +67,6 @@ class DatabaseMemberService(
     fun updateMemberStanding(name: String, standing: MemberStanding): Member? {
         val member = memberRepository.findByNameIgnoreCase(name).orElse(null) ?: return null
         member.standing = standing
-        member.updatedAt = LocalDateTime.now()
         return memberRepository.save(member)
     }
 
@@ -81,7 +79,6 @@ class DatabaseMemberService(
         if (standing != null) {
             member.standing = standing
         }
-        member.updatedAt = LocalDateTime.now()
         return memberRepository.save(member)
     }
 
@@ -98,7 +95,6 @@ class DatabaseMemberService(
         profession?.let { guest.profession = it }
         referrer?.let { guest.referrer = it }
         eventDate?.let { guest.eventDate = it }
-        guest.updatedAt = LocalDateTime.now()
         return guestRepository.save(guest)
     }
 

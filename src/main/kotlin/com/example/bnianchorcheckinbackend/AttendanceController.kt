@@ -121,10 +121,30 @@ class AttendanceController(
     }
 
     @PostMapping("/api/checkin")
-    @Operation(summary = "Record check-in")
+    @Operation(summary = "Record check-in (in-memory + DB for members)")
     fun checkIn(@RequestBody request: CheckInRequest): ResponseEntity<Map<String, String>> {
         return try {
             val message = attendanceService.recordCheckIn(request)
+
+            // Also persist member check-ins to DB so they appear in /api/report
+            if (request.type.equals("member", ignoreCase = true) && eventDbService != null) {
+                try {
+                    val today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Hong_Kong")).toString()
+                    val logReq = AttendanceLogRequest(
+                        attendeeId = null,
+                        attendeeType = "member",
+                        attendeeName = request.name,
+                        attendeeProfession = request.domain,
+                        eventDate = today,
+                        checkedInAt = request.currentTime,
+                        status = "on-time"
+                    )
+                    withDbRetry("checkIn-logAttendance") { eventDbService.logAttendance(logReq) }
+                } catch (e: Exception) {
+                    log.warn("DB persist for /api/checkin member '{}' failed: {}", request.name, e.message)
+                }
+            }
+
             ResponseEntity.ok(mapOf("status" to "success", "message" to message))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.status(HttpStatus.BAD_REQUEST).body(mapOf("status" to "error", "message" to e.message!!))
@@ -132,9 +152,50 @@ class AttendanceController(
     }
 
     @GetMapping("/api/records")
-    @Operation(summary = "Get all records")
+    @Operation(summary = "Get all records (DB members + in-memory guests merged)")
     fun getRecords(): Map<String, List<CheckInRecord>> {
-        return mapOf("records" to attendanceService.getAllRecords())
+        val hkt = java.time.ZoneId.of("Asia/Hong_Kong")
+        val hktFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
+
+        val normalizedInMemory = attendanceService.getAllRecords().map { r ->
+            val hktTimestamp = try {
+                java.time.ZonedDateTime.parse(r.timestamp).withZoneSameInstant(hkt).format(hktFmt)
+            } catch (_: Exception) {
+                try { java.time.Instant.parse(r.timestamp).atZone(hkt).format(hktFmt) }
+                catch (_: Exception) { r.timestamp }
+            }
+            r.copy(timestamp = hktTimestamp, receivedAt = hktTimestamp)
+        }
+
+        val dbRecords = try {
+            val reportData = eventDbService?.getReportData()
+            if (reportData != null) {
+                val allMembers = try {
+                    databaseMemberService?.getAllMembers() ?: emptyList()
+                } catch (_: Exception) { emptyList() }
+                val memberDomainMap = allMembers.associate { (it["name"] as String) to (it["domain"] as? String ?: "") }
+                val eventDate = reportData.eventDate
+
+                reportData.attendees.filter { it.role == "MEMBER" }.map { att ->
+                    val isoTimestamp = if (att.checkInTime != null && !att.checkInTime.contains("T"))
+                        "${eventDate}T${att.checkInTime}+08:00" else (att.checkInTime ?: "")
+                    CheckInRecord(
+                        name = att.memberName,
+                        domain = memberDomainMap[att.memberName] ?: "",
+                        type = "member",
+                        timestamp = isoTimestamp,
+                        receivedAt = isoTimestamp,
+                        role = "MEMBER"
+                    )
+                }
+            } else emptyList()
+        } catch (_: Exception) { emptyList<CheckInRecord>() }
+
+        val inMemoryNames = normalizedInMemory.map { it.name.lowercase() }.toSet()
+        val deduped = dbRecords.filter { it.name.lowercase() !in inMemoryNames }
+
+        val merged = (deduped + normalizedInMemory).sortedByDescending { it.timestamp }
+        return mapOf("records" to merged)
     }
 
     @DeleteMapping("/api/records")
@@ -197,30 +258,78 @@ class AttendanceController(
     }
     
     @GetMapping("/api/report")
-    @Operation(summary = "Get report data for the current event")
+    @Operation(summary = "Get report data for the current event (DB members + in-memory guests)")
     fun getReportData(): ResponseEntity<ReportData> {
         val reportData = try {
             if (eventDbService != null) withDbRetry("getReportData") { eventDbService.getReportData() } else null
         } catch (e: Exception) {
-            org.slf4j.LoggerFactory.getLogger(AttendanceController::class.java)
-                .warn("DB getReportData failed ({}), falling back to in-memory", e.message)
+            log.warn("DB getReportData failed: {}", e.message)
             null
-        } ?: attendanceService.getReportData()
-        return if (reportData != null) {
-            ResponseEntity.ok(reportData)
-        } else {
-            ResponseEntity.status(HttpStatus.NOT_FOUND).build()
+        } ?: return ResponseEntity.status(HttpStatus.NOT_FOUND).build()
+
+        // Merge ALL in-memory check-ins into the DB report (guests always, members if not already in DB)
+        val allInMemory = attendanceService.getAllRecords()
+        if (allInMemory.isEmpty()) {
+            return ResponseEntity.ok(reportData)
         }
+
+        val hkt = java.time.ZoneId.of("Asia/Hong_Kong")
+        val timeFmt = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
+        val dbAttendeeNames = reportData.attendees.map { it.memberName.lowercase() }.toSet()
+
+        val extraAttendees = allInMemory
+            .filter { r -> r.name.lowercase() !in dbAttendeeNames }
+            .map { r ->
+                val role = when {
+                    r.role.uppercase() in listOf("VIP", "SPEAKER") -> r.role.uppercase()
+                    r.type.equals("member", ignoreCase = true) -> "MEMBER"
+                    else -> "GUEST"
+                }
+                val timeStr = toHktLocalTime(r.timestamp)?.format(timeFmt) ?: r.timestamp
+
+                val status = try {
+                    val cutoff = java.time.LocalTime.parse(reportData.onTimeCutoff)
+                    val checkIn = java.time.LocalTime.parse(timeStr)
+                    if (checkIn.isBefore(cutoff)) "on-time" else "late"
+                } catch (_: Exception) { "on-time" }
+
+                AttendanceRecord(memberName = r.name, status = status, checkInTime = timeStr, role = role)
+            }
+
+        if (extraAttendees.isEmpty()) {
+            return ResponseEntity.ok(reportData)
+        }
+
+        val guestExtra = extraAttendees.filter { it.role != "MEMBER" }
+        val memberExtra = extraAttendees.filter { it.role == "MEMBER" }
+        val updatedAbsentees = reportData.absentees.filter { ab -> ab.memberName.lowercase() !in memberExtra.map { it.memberName.lowercase() }.toSet() }
+
+        val merged = reportData.copy(
+            attendees = reportData.attendees + extraAttendees,
+            absentees = updatedAbsentees,
+            stats = reportData.stats.copy(
+                totalAttendees = reportData.stats.totalAttendees + extraAttendees.size,
+                absentCount = updatedAbsentees.size,
+                guestCount = guestExtra.count { it.role == "GUEST" },
+                vipCount = guestExtra.count { it.role == "VIP" || it.role == "SPEAKER" },
+                vipArrivedCount = guestExtra.count { it.role == "VIP" || it.role == "SPEAKER" },
+                speakerCount = guestExtra.count { it.role == "SPEAKER" },
+                onTimeCount = reportData.stats.onTimeCount + extraAttendees.count { it.status == "on-time" },
+                lateCount = reportData.stats.lateCount + extraAttendees.count { it.status == "late" }
+            )
+        )
+        return ResponseEntity.ok(merged)
     }
     
     @GetMapping("/api/events/current")
-    @Operation(summary = "Get current event")
+    @Operation(summary = "Get current event (DB only, no attendance data)")
     fun getCurrentEvent(): ResponseEntity<EventData> {
         val event = try {
             if (eventDbService != null) withDbRetry("getCurrentEvent") { eventDbService.getCurrentEvent() } else null
         } catch (e: Exception) {
+            log.warn("DB getCurrentEvent failed: {}", e.message)
             null
-        } ?: attendanceService.getCurrentEvent()
+        }
         return if (event != null) {
             ResponseEntity.ok(event)
         } else {
@@ -276,27 +385,40 @@ class AttendanceController(
     @PostMapping("/api/attendance/log")
     @Operation(summary = "Log attendance record directly")
     fun logAttendance(@RequestBody request: AttendanceLogRequest): ResponseEntity<Map<String, String>> {
-        // Try DB first
-        val dbError: Exception? = try {
-            if (eventDbService != null) withDbRetry("logAttendance") { eventDbService.logAttendance(request) }
-            null
-        } catch (e: Exception) {
-            log.warn("DB logAttendance failed ({}), falling back to in-memory", e.message)
-            e
+        val isGuestType = request.attendeeType.lowercase() in listOf("guest", "vip", "speaker")
+
+        // Members → DB (bni_anchor_attendances uses member_id FK)
+        if (!isGuestType) {
+            val dbError: Exception? = try {
+                if (eventDbService != null) withDbRetry("logAttendance") { eventDbService.logAttendance(request) }
+                null
+            } catch (e: Exception) {
+                log.warn("DB logAttendance failed ({}), falling back to in-memory", e.message)
+                e
+            }
+            if (dbError == null) {
+                return ResponseEntity.ok(mapOf("status" to "success", "message" to "Attendance logged successfully"))
+            }
         }
-        if (dbError == null) {
-            return ResponseEntity.ok(mapOf("status" to "success", "message" to "Attendance logged successfully"))
-        }
-        // Fallback: record in in-memory service so it shows up in the report
+
+        // Guests / fallback → in-memory (so they appear in report via getAllRecords)
         return try {
+            val normalizedType = if (request.attendeeType.lowercase() in listOf("vip", "speaker")) "guest" else request.attendeeType
+            val role = when (request.attendeeType.lowercase()) {
+                "vip" -> "VIP"
+                "speaker" -> "SPEAKER"
+                "guest" -> "GUEST"
+                else -> "MEMBER"
+            }
             val fallbackRequest = CheckInRequest(
                 name = request.attendeeName,
-                type = request.attendeeType,
+                type = normalizedType,
                 currentTime = request.checkedInAt,
-                domain = request.attendeeProfession ?: ""
+                domain = request.attendeeProfession ?: "",
+                role = role
             )
             attendanceService.recordCheckIn(fallbackRequest)
-            ResponseEntity.ok(mapOf("status" to "success", "message" to "Attendance logged (in-memory)"))
+            ResponseEntity.ok(mapOf("status" to "success", "message" to "Attendance logged"))
         } catch (e2: Exception) {
             if (e2.message?.contains("已經簽到") == true) {
                 ResponseEntity.status(HttpStatus.CONFLICT)
@@ -385,21 +507,24 @@ class AttendanceController(
                 }
             }
             for (attendee in reportData.attendees) {
-                if (attendee.role != "GUEST") continue
+                if (attendee.role !in listOf("GUEST", "VIP", "SPEAKER")) continue
                 val domain = (guestDomainMap[attendee.memberName] ?: "").replace(",", "，")
+                val roleLabel = attendee.role.lowercase()
                 val statusText = when (attendee.status) {
                     "on-time" -> "準時"
                     "late" -> "遲到"
                     else -> attendee.status
                 }
-                writer.println("${attendee.memberName},${domain},guest,${statusText},${attendee.checkInTime ?: ""}")
+                writer.println("${attendee.memberName},${domain},${roleLabel},${statusText},${attendee.checkInTime ?: ""}")
             }
             // If DB report has no guest records, fallback to in-memory check-in records
-            if (reportData.attendees.none { it.role == "GUEST" }) {
+            if (reportData.attendees.none { it.role in listOf("GUEST", "VIP", "SPEAKER") }) {
                 for (guest in records.filter { it.type.equals("guest", ignoreCase = true) }) {
                     val domain = guest.domain.replace(",", "，")
+                    val roleLabel = guest.role.lowercase().ifEmpty { "guest" }
                     val guestStatus = determineGuestStatus(guest.timestamp, reportData.onTimeCutoff)
-                    writer.println("${guest.name},${domain},guest,${guestStatus},${guest.timestamp}")
+                    val hktTime = toHktLocalTime(guest.timestamp)?.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")) ?: guest.timestamp
+                    writer.println("${guest.name},${domain},${roleLabel},${guestStatus},${hktTime}")
                 }
             }
         } else {
@@ -431,18 +556,25 @@ class AttendanceController(
             .body(out.toByteArray())
     }
     
+    private fun toHktLocalTime(timestamp: String): java.time.LocalTime? {
+        val hkt = java.time.ZoneId.of("Asia/Hong_Kong")
+        return try {
+            java.time.ZonedDateTime.parse(timestamp).withZoneSameInstant(hkt).toLocalTime()
+        } catch (_: Exception) {
+            try {
+                java.time.Instant.parse(timestamp).atZone(hkt).toLocalTime()
+            } catch (_: Exception) {
+                val m = Regex("(\\d{2}:\\d{2}:\\d{2})").find(timestamp)
+                if (m != null) java.time.LocalTime.parse(m.groupValues[1]) else null
+            }
+        }
+    }
+
     private fun determineGuestStatus(timestamp: String, onTimeCutoff: String): String {
         return try {
             val cutoffTime = java.time.LocalTime.parse(onTimeCutoff)
-            // Try to extract time from timestamp (supports various formats)
-            val timePattern = Regex("T?(\\d{2}:\\d{2}:\\d{2})")
-            val match = timePattern.find(timestamp)
-            if (match != null) {
-                val checkInTime = java.time.LocalTime.parse(match.groupValues[1])
-                if (checkInTime.isBefore(cutoffTime)) "準時" else "遲到"
-            } else {
-                "已簽到"
-            }
+            val checkInTime = toHktLocalTime(timestamp) ?: return "已簽到"
+            if (checkInTime.isBefore(cutoffTime)) "準時" else "遲到"
         } catch (e: Exception) {
             "已簽到"
         }
