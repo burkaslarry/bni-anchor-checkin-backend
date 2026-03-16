@@ -8,6 +8,10 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 
+/**
+ * DeepSeek API client: member matching (full + quick), insights (generateInsight, analyzeGuestMatch, generateRetentionStrategy), tool-calling (chatWithWebSearch).
+ * API key from deepseek.api.key; URL from deepseek.api.url. Side effects: HTTP calls to DeepSeek; no DB.
+ */
 @Service
 class DeepSeekService(
     private val objectMapper: ObjectMapper
@@ -216,10 +220,10 @@ class DeepSeekService(
     )
     
     /**
-     * 使用 DeepSeek API 進行會員匹配
-     * 返回 JSON 格式的匹配結果
-     * 
-     * 使用 deepseek-chat 模型以獲得更好的 JSON 格式輸出
+     * Full member match: guest + members → JSON string (matches array or error). Uses deepseek-chat, json_object format.
+     * Side effect: HTTP POST to DeepSeek API. Returns error JSON when key missing or API fails.
+     * @param request guestName, guestProfession, guestTargetProfession, guestBottlenecks, guestRemarks, members
+     * @return JSON string: array of { memberName, matchStrength, reason } or { "error": "..." }
      */
     fun matchMembersWithAI(request: MemberMatchRequest): String {
         println("🤖 [DeepSeekService] Starting matchMembersWithAI")
@@ -379,8 +383,9 @@ $memberList
     }
     
     /**
-     * 簡化版配對 - 用於來賓簽到後的快速配對
-     * 只返回會員名稱和專業領域，不需要理由
+     * Quick match at check-in: guest + members → JSON (matches with memberName, profession, matchStrength). No reason.
+     * Side effect: HTTP POST to DeepSeek API.
+     * @return JSON string: { "matches": [ ... ] } or { "error": "..." }
      */
     fun quickMatchForCheckin(guestName: String, guestProfession: String, members: List<MemberInfo>): String {
         println("🤖 [DeepSeekService] Starting quickMatchForCheckin")

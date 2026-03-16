@@ -79,6 +79,7 @@ class EventDbService(
         return memberRepository.findByNameIgnoreCase(name).orElse(null)?.id?.toInt()
     }
 
+    /** Create a new event in DB. Does NOT delete existing events; latest event is used for report/export. */
     @Transactional
     fun createEvent(request: EventRequest): EventData {
         val eventDate = LocalDate.parse(request.date)

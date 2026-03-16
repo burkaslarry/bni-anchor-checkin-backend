@@ -4,6 +4,11 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
+/**
+ * REST controller for guest–member matching via DeepSeek AI. No auth. Members from DB or CSV fallback.
+ * Endpoints: POST /api/matching/members (full match), POST /api/matching/quick, POST /api/matching/batch, GET /api/matching/health.
+ * Side effects: external DeepSeek API calls; no DB write.
+ */
 @RestController
 @RequestMapping("/api/matching")
 @CrossOrigin(origins = ["*"])
@@ -19,8 +24,9 @@ class MatchingController(
     )
     
     /**
-     * 使用 DeepSeek AI 進行會員配對
-     * POST /api/matching/members
+     * Full member match for one guest (target, bottlenecks, remarks). POST /api/matching/members.
+     * Side effect: DeepSeek API call. Returns JSON string in "matches" (array) or error JSON.
+     * @return 200 { "matches": "...", "provider": "deepseek" } | 500 { "matches": "{\"error\":\"...\"}", "provider": "error" }
      */
     @PostMapping("/members")
     fun matchMembers(
@@ -41,15 +47,13 @@ class MatchingController(
         }
     }
     
-    /**
-     * 來賓簽到後的快速配對
-     * POST /api/matching/quick
-     */
+    /** Request for quick match: guestName, guestProfession. */
     data class QuickMatchRequest(
         val guestName: String,
         val guestProfession: String
     )
     
+    /** Members from DB (if [DatabaseMemberService] present) or CSV. Side effect: DB or CSV read. */
     private fun getMembersForMatching(): List<DeepSeekService.MemberInfo> {
         return if (databaseMemberService != null) {
             try {
@@ -67,6 +71,10 @@ class MatchingController(
         }
     }
 
+    /**
+     * Quick match at check-in (guest name + profession only). POST /api/matching/quick. Side effect: DeepSeek API.
+     * @return 200 { "matches", "provider" } | 500
+     */
     @PostMapping("/quick")
     fun quickMatch(
         @RequestBody request: QuickMatchRequest
@@ -90,10 +98,7 @@ class MatchingController(
         }
     }
     
-    /**
-     * 批量配對 - 處理多位來賓
-     * POST /api/matching/batch
-     */
+    /** Single guest for batch: name, profession, optional remarks. */
     data class BatchGuestInfo(
         val name: String,
         val profession: String,
@@ -122,6 +127,10 @@ class MatchingController(
         val provider: String = "deepseek"
     )
     
+    /**
+     * Batch match multiple guests (parallel). POST /api/matching/batch. Side effect: DeepSeek API per guest.
+     * @return 200 BatchMatchResponse | 500
+     */
     @PostMapping("/batch")
     fun batchMatch(
         @RequestBody request: BatchMatchRequest
@@ -181,10 +190,7 @@ class MatchingController(
         }
     }
     
-    /**
-     * 健康檢查 endpoint
-     * GET /api/matching/health
-     */
+    /** Health check. GET /api/matching/health. No side effects. @return 200 { "status", "service", "timestamp" } */
     @GetMapping("/health")
     fun health(): ResponseEntity<Map<String, String>> {
         return ResponseEntity.ok(mapOf(

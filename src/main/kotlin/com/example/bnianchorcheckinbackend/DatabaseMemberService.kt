@@ -42,6 +42,21 @@ class DatabaseMemberService(
         }
     }
 
+    /**
+     * Guests for a specific event date (for onsite support: check-in form, export). Used when eventDate query param is provided.
+     */
+    fun getGuestsForEventDate(eventDate: String): List<Map<String, String>> {
+        if (eventDate.isBlank()) return emptyList()
+        return guestRepository.findByEventDate(eventDate).map { guest ->
+            mapOf(
+                "name" to guest.name,
+                "profession" to guest.profession,
+                "referrer" to (guest.referrer ?: ""),
+                "eventDate" to (guest.eventDate ?: "")
+            )
+        }
+    }
+
     fun getMemberByName(name: String): MemberData? {
         val member = memberRepository.findByNameIgnoreCase(name).orElse(null) ?: return null
         return MemberData(

@@ -4,6 +4,10 @@ import java.time.LocalDateTime
 import com.fasterxml.jackson.annotation.JsonSubTypes
 import com.fasterxml.jackson.annotation.JsonTypeInfo
 
+/**
+ * Data classes for attendance QR payloads (member/guest), check-in, events, report, and AI insights.
+ * Sealed [AttendanceQRData] used for QR scan validation.
+ */
 @JsonTypeInfo(
     use = JsonTypeInfo.Id.NAME,
     include = JsonTypeInfo.As.PROPERTY,

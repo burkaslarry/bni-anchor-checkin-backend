@@ -11,6 +11,11 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
+/**
+ * In-memory attendance and event service: QR scan validation, check-in, records, events, report, AI insights.
+ * Uses [CsvService] for member/guest lookup; [DeepSeekService] for retention insights. Not transactional (in-memory).
+ * Side effects: in-memory state; WebSocket broadcast on check-in/delete/clear/event create; external AI call in generateInsights.
+ */
 @Service
 class AttendanceService(
     private val csvService: CsvService,
@@ -29,6 +34,13 @@ class AttendanceService(
     // Event attendance records: eventId -> (memberName -> AttendanceRecord)
     private val eventAttendanceMap = ConcurrentHashMap<Int, ConcurrentHashMap<String, AttendanceRecord>>()
 
+    /**
+     * Validate QR payload and record attendance (in-memory only; no DB). Throws on invalid member/guest/referrer.
+     * Side effect: in-memory maps updated; no WebSocket.
+     * @param qrPayload JSON of [MemberQRData] or [GuestQRData]
+     * @return Success message
+     * @throws IllegalArgumentException Invalid payload, member, or referrer
+     */
     fun recordAttendance(qrPayload: String): String {
         val attendanceData = try {
             objectMapper.readValue<AttendanceQRData>(qrPayload)
@@ -76,6 +88,13 @@ class AttendanceService(
         return "Attendance recorded successfully for $name (${type.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }})."
     }
 
+    /**
+     * Record manual check-in. Rejects duplicate (same name+type). Resolves domain from CSV for members. Broadcasts via WebSocket.
+     * Side effects: in-memory add; eventAttendanceMap update; WebSocket broadcast.
+     * @param request name, type (member/guest/vip/speaker), currentTime, domain, role, tags, referrer
+     * @return "Check-in successful"
+     * @throws IllegalArgumentException Invalid type or duplicate (已經簽到過了)
+     */
     fun recordCheckIn(request: CheckInRequest): String {
         if (request.type.lowercase() !in listOf("guest", "member", "vip", "speaker")) {
             throw IllegalArgumentException("Invalid user type")
@@ -187,6 +206,10 @@ class AttendanceService(
         return csvService.getAllMembersWithDomain()
     }
     
+    /**
+     * Create a new event (in-memory). Does NOT delete or clear existing events; old events remain for history.
+     * "Current" event is always the latest (events.lastOrNull()). Onsite support uses this latest event for attendance, guests, export.
+     */
     fun createEvent(event: EventRequest): EventData {
         val eventId = eventIdCounter.getAndIncrement()
         val eventData = EventData(
@@ -221,7 +244,8 @@ class AttendanceService(
         
         return eventData
     }
-    
+
+    /** Returns the most recently created event (in-memory). No side effects. */
     fun getCurrentEvent(): EventData? {
         return events.lastOrNull()
     }
@@ -262,7 +286,12 @@ class AttendanceService(
             stats = stats
         )
     }
-    
+
+    /**
+     * Update member attendance for current event (on-time/late by onTimeCutoff). Broadcasts via WebSocket.
+     * Side effect: in-memory map update; WebSocket broadcast.
+     * @return Updated record or null if no current event
+     */
     fun updateAttendance(memberName: String, checkInTime: LocalDateTime, role: String = "MEMBER", tags: List<String> = emptyList()): AttendanceRecord? {
         val currentEvent = getCurrentEvent() ?: return null
         val attendanceMap = eventAttendanceMap[currentEvent.id] ?: return null
@@ -291,7 +320,12 @@ class AttendanceService(
         
         return record
     }
-    
+
+    /**
+     * Update guest attendance for current event. Uses key "guest_{name}_{role}" to avoid member collision. Broadcasts via WebSocket.
+     * Side effect: in-memory map update; WebSocket broadcast.
+     * @return Updated record or null if no current event
+     */
     fun updateGuestAttendance(guestName: String, checkInTime: LocalDateTime, role: String, tags: List<String> = emptyList()): AttendanceRecord? {
         val currentEvent = getCurrentEvent() ?: return null
         val attendanceMap = eventAttendanceMap[currentEvent.id] ?: return null
@@ -354,6 +388,12 @@ class AttendanceService(
     // Cache for generated insights
     private val aiInsightsCache = ConcurrentHashMap<Int, MutableList<AIInsightResponse>>()
     
+    /**
+     * Generate AI insights for event (interest/retention/target_audience). Retention uses [DeepSeekService]. Caches result.
+     * Side effects: DeepSeek API call for retention; in-memory cache write.
+     * @param request eventId, analysisType
+     * @return [AIInsightResponse] with insights and recommendations
+     */
     fun generateInsights(request: AIInsightRequest): AIInsightResponse {
         val event = events.find { it.id == request.eventId }
         val attendanceMap = eventAttendanceMap[request.eventId]
